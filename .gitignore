@@ -2,3 +2,17 @@
 CLAUDE.md
 .claude/
 /temp/
+
+# build.sh 的產出與歸檔.
+/bin/
+
+# build.sh 由 msi/gui.wxs.in 產生的中間檔.
+/msi/gui.wxs
+
+# 前端的相依套件, 打包產出與每次建置重新產生的 bindings.
+/frontend/node_modules/
+/frontend/dist/
+/frontend/bindings/
+
+# build.sh 複製進來供 GUI 內嵌的遠端程式.
+/internal/remotebin/gpumon.bin

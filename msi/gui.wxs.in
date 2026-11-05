@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  GPU Monitor 的 Windows 安裝包定義檔範本, 以 wixl 編譯.
+
+  build.sh 以 sed 替換下列佔位符後產出 msi/gui.wxs (不入版控):
+    @VERSION@      MSI Product Version, 為剝除 pre-release 尾碼的純數字 x.y.z.
+    @FULLVERSION@  完整版本字串, 用於指向 bin/ 內的執行檔.
+
+  UpgradeCode 為固定 GUID, 寫定後不得變更, 變更即視為另一產品. ProductCode 設為
+  *, 每次編譯自動產生新 GUID, 搭配 MajorUpgrade 於安裝新版時自動移除舊版;
+  AllowSameVersionUpgrades 允許同版本覆蓋, 降級維持拒絕.
+
+  安裝範圍為 perUser, 不需管理員權限, 安裝目錄為
+  %LOCALAPPDATA%\Programs\Augustus Chen\GPU Monitor\. 開始功能表與桌面捷徑
+  無條件安裝, 因 wixl 不支援 <UI> 元素, 無法在安裝過程詢問使用者.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*"
+           Name="GPU Monitor"
+           Language="1033"
+           Version="@VERSION@"
+           Manufacturer="Augustus Chen"
+           UpgradeCode="D331C0B0-E160-4CDD-B018-1C747423E93C">
+
+    <Package InstallerVersion="500"
+             Compressed="yes"
+             InstallScope="perUser"
+             Description="GPU Monitor"
+             Manufacturer="Augustus Chen" />
+
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+
+    <!--
+      REINSTALLMODE 預設 omus 的 o 只覆蓋較舊版本的檔案. 升級時檔案成本計算早於
+      RemoveExistingProducts, 內容未變的無版本檔案會被判定不必複製, 隨後又隨舊
+      產品一併移除. a 強制重寫所有檔案以避免此問題.
+    -->
+    <Property Id="REINSTALLMODE" Value="amus" />
+
+    <Media Id="1" Cabinet="gpumon.cab" EmbedCab="yes" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="LocalAppDataFolder">
+        <Directory Id="ProgramsFolder" Name="Programs">
+          <Directory Id="VendorFolder" Name="Augustus Chen">
+            <Directory Id="INSTALLDIR" Name="GPU Monitor">
+              <Component Id="GpumonExe" Guid="*" Win64="yes">
+                <File Id="GpumonExe"
+                      Source="bin/gpumon-@FULLVERSION@-windows-amd64.exe"
+                      Name="gpumon.exe"
+                      KeyPath="yes" />
+              </Component>
+            </Directory>
+          </Directory>
+        </Directory>
+      </Directory>
+
+      <Directory Id="ProgramMenuFolder">
+        <Component Id="GpumonStartMenuShortcut" Guid="*" Win64="yes">
+          <Shortcut Id="GpumonStartMenuShortcut"
+                    Name="GPU Monitor"
+                    Description="GPU Monitor"
+                    Target="[INSTALLDIR]gpumon.exe"
+                    WorkingDirectory="INSTALLDIR" />
+          <RegistryValue Root="HKCU"
+                         Key="Software\Augustus Chen\GPU Monitor"
+                         Name="start_menu_shortcut"
+                         Type="integer"
+                         Value="1"
+                         KeyPath="yes" />
+        </Component>
+      </Directory>
+
+      <Directory Id="DesktopFolder">
+        <Component Id="GpumonDesktopShortcut" Guid="*" Win64="yes">
+          <Shortcut Id="GpumonDesktopShortcut"
+                    Name="GPU Monitor"
+                    Description="GPU Monitor"
+                    Target="[INSTALLDIR]gpumon.exe"
+                    WorkingDirectory="INSTALLDIR" />
+          <RegistryValue Root="HKCU"
+                         Key="Software\Augustus Chen\GPU Monitor"
+                         Name="desktop_shortcut"
+                         Type="integer"
+                         Value="1"
+                         KeyPath="yes" />
+        </Component>
+      </Directory>
+    </Directory>
+
+    <Feature Id="Main" Title="GPU Monitor" Level="1">
+      <ComponentRef Id="GpumonExe" />
+      <ComponentRef Id="GpumonStartMenuShortcut" />
+      <ComponentRef Id="GpumonDesktopShortcut" />
+    </Feature>
+
+  </Product>
+</Wix>
