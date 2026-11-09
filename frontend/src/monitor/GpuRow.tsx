@@ -1,6 +1,6 @@
 import { memo } from "react";
 import type { Device, LiveGPU } from "../api/types";
-import { Chart, type ChartData, type ChartSeries } from "../chart/Chart";
+import { Chart, ChartLegend, type ChartData, type ChartSeries } from "../chart/Chart";
 import { ChevronDown, ChevronRight } from "../components/Icons";
 import { gib } from "../format";
 import { useT, type Translator } from "../i18n";
@@ -28,7 +28,7 @@ function memText(used: number | null, total: number | null | undefined, t: Trans
   return t("value.pair", { used: gib(used), total: t("unit.gib", { value: gib(total) }) });
 }
 
-// Readouts 為 GPU 橫列左側的文字讀數. gpu 為 undefined 時 (尚無取樣) 全部顯示 N/A.
+// Readouts 為 GPU 卡片左側的文字讀數. gpu 為 undefined 時 (尚無取樣) 全部顯示 N/A.
 const Readouts = memo(function Readouts({ device, gpu }: { device: Device; gpu: LiveGPU | undefined }) {
   const t = useT();
   const v = (x: number | null | undefined) => (x === null || x === undefined ? null : x);
@@ -84,10 +84,12 @@ const Readouts = memo(function Readouts({ device, gpu }: { device: Device; gpu: 
 function GpuTitle({ device, collapsed, onToggle }: { device: Device; collapsed: boolean; onToggle: () => void }) {
   const t = useT();
   return (
-    <button type="button" className="gpu-title" aria-expanded={!collapsed} onClick={onToggle}>
+    <button type="button" className="card-title" aria-expanded={!collapsed} onClick={onToggle}>
       {collapsed ? <ChevronRight /> : <ChevronDown />}
       <span className="gpu-badge">{t("monitor.gpu", { id: device.id })}</span>
-      <span className="ellipsis">{device.name}</span>
+      <span className="ellipsis" title={device.name}>
+        {device.name}
+      </span>
     </button>
   );
 }
@@ -105,22 +107,25 @@ export interface GpuRowProps {
   onHover?: (t: number | null) => void;
 }
 
-// GpuRow 為一張 GPU 的橫列, 左側為文字讀數, 右側為曲線圖; 收合後只留標題一行.
-// 監看畫面與歷史畫面共用.
+// GpuRow 為一張 GPU 的卡片. 頂端的標題列左側為 GPU 名稱, 右側為曲線圖例; 其下左側為
+// 文字讀數, 右側為曲線圖. 收合後只留標題一行. 監看畫面與歷史畫面共用.
 export const GpuRow = memo(function GpuRow(p: GpuRowProps) {
   const t = useT();
   const toggle = () => p.onToggle(p.device.id, !p.collapsed);
   if (p.collapsed) {
     return (
-      <section className="gpu-row collapsed">
+      <section className="card card-collapsed">
         <GpuTitle device={p.device} collapsed onToggle={toggle} />
       </section>
     );
   }
   return (
-    <section className="gpu-row">
-      <div className="gpu-readouts">
+    <section className="card gpu-card">
+      <div className="gpu-head">
         <GpuTitle device={p.device} collapsed={false} onToggle={toggle} />
+        <ChartLegend series={p.series} />
+      </div>
+      <div className="gpu-readouts">
         <Readouts device={p.device} gpu={p.gpu} />
       </div>
       <div className="gpu-chart">

@@ -5,7 +5,7 @@ import type { ChartGap } from "../chart/Chart";
 import { gpuSeries, toChartData } from "../chart/gpuSeries";
 import { formatClock, formatDateRange } from "../format";
 import { useT } from "../i18n";
-import { setGPUCollapsed } from "../state/app";
+import { setGPUCollapsed, setProcessesCollapsed } from "../state/app";
 import { GpuRow } from "../monitor/GpuRow";
 import { ProcessTable } from "../monitor/ProcessTable";
 import { useCurveFeed } from "../monitor/useCurveFeed";
@@ -22,17 +22,25 @@ function queryRecording(path: string, from: number, to: number, width: number, f
 
 export interface HistoryBlockProps {
   info: RecordingInfo;
-  // from 與 to 為所有區塊共用的顯示範圍 (Unix 微秒).
+  // from 與 to 為所有分組共用的顯示範圍 (Unix 微秒).
   from: number;
   to: number;
   curves: Curve[];
   collapsedGPUs: number[] | undefined;
+  procsCollapsed: boolean;
 }
 
-// HistoryBlock 為歷史畫面中一個記錄檔的區塊: 標題列, 每張 GPU 的橫列與程序列表.
-// 文字讀數與程序列表顯示滑鼠在本區塊曲線圖上所指的時刻, 滑鼠不在曲線圖上時顯示
-// 顯示範圍右緣的時刻.
-export const HistoryBlock = memo(function HistoryBlock({ info, from, to, curves, collapsedGPUs }: HistoryBlockProps) {
+// HistoryBlock 為歷史畫面中一個記錄檔的分組: 一行分組標題, 其下為每張 GPU 的卡片與
+// 程序卡片. 文字讀數與程序卡片顯示滑鼠在本分組曲線圖上所指的時刻, 滑鼠不在曲線圖上
+// 時顯示顯示範圍右緣的時刻.
+export const HistoryBlock = memo(function HistoryBlock({
+  info,
+  from,
+  to,
+  curves,
+  collapsedGPUs,
+  procsCollapsed,
+}: HistoryBlockProps) {
   const t = useT();
   const gpus = info.devices?.gpus ?? noDevices;
   const collapsed = collapsedGPUs ?? noGPUs;
@@ -44,6 +52,7 @@ export const HistoryBlock = memo(function HistoryBlock({ info, from, to, curves,
     (gpuID: number, c: boolean) => void setGPUCollapsed(info.host, gpuID, c),
     [info.host],
   );
+  const onToggleProcs = useCallback((c: boolean) => void setProcessesCollapsed(info.host, c), [info.host]);
 
   const result = useCurveFeed(info.path, anyExpanded, from, to, chartWidth, historyFields, queryRecording);
 
@@ -84,14 +93,14 @@ export const HistoryBlock = memo(function HistoryBlock({ info, from, to, curves,
   const procs = useProcessesAt(info.path, readAt);
 
   return (
-    <section className="host-block">
-      <header className="host-header all">
-        <span className="host-hostname">{info.devices?.hostname || info.host}</span>
-        <span className="host-name">{info.host}</span>
+    <div className="history-group">
+      <header className="history-group-head">
+        <span className="history-group-title">{info.devices?.hostname || info.host}</span>
+        <span className="history-group-detail">{info.host}</span>
         <span className="flex1" />
-        <span className="host-name">{formatDateRange(info.start, info.end)}</span>
+        <span className="history-group-detail">{formatDateRange(info.start, info.end)}</span>
       </header>
-      {gpus.length === 0 && <div className="host-note">{t("history.noGpu")}</div>}
+      {gpus.length === 0 && <div className="card card-note">{t("history.noGpu")}</div>}
       {gpus.map((g) => (
         <GpuRow
           key={g.id}
@@ -118,8 +127,10 @@ export const HistoryBlock = memo(function HistoryBlock({ info, from, to, curves,
           }
           procs={procs?.procs ?? noProcs}
           emptyText={t("history.noProcesses")}
+          collapsed={procsCollapsed}
+          onToggle={onToggleProcs}
         />
       )}
-    </section>
+    </div>
   );
 });

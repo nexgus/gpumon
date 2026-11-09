@@ -165,11 +165,9 @@ type HostConn struct {
 	KeyFile string `json:"key_file"`
 }
 
-// Host 為一台主機的設定.
+// Host 為一台主機的設定. 舊版設定檔中各主機的 interval_ms 讀取時略過.
 type Host struct {
 	HostConn
-	// IntervalMS 為取樣間隔, 單位為毫秒.
-	IntervalMS int `json:"interval_ms"`
 }
 
 // ID 回傳主機的識別字串. 使用者名稱非空時為 user@addr; 留空時只有位址,
@@ -201,25 +199,33 @@ type Data struct {
 
 	Curves []Curve `json:"curves"`
 
+	// IntervalMS 為所有主機共用的取樣間隔, 單位為毫秒.
+	IntervalMS int `json:"interval_ms"`
+
 	// Hosts 依新增的先後排列.
 	Hosts []Host `json:"hosts"`
 
 	// CollapsedGPUs 以主機識別字串為鍵, 值為已收合的 GPU id, 由小到大.
 	CollapsedGPUs map[string][]int `json:"collapsed_gpus"`
+
+	// CollapsedProcs 為程序卡片已收合的主機識別字串, 不含空字串與重複.
+	CollapsedProcs []string `json:"collapsed_procs"`
 }
 
 // Default 回傳預設設定.
 func Default() Data {
 	return Data{
-		Version:       CurrentVersion,
-		Window:        Window{Width: DefaultWindowWidth, Height: DefaultWindowHeight},
-		Appearance:    AppearanceSystem,
-		Language:      LanguageEnglish,
-		MonitorRange:  DefaultRange,
-		HistoryRange:  DefaultRange,
-		Curves:        DefaultCurves(),
-		Hosts:         []Host{},
-		CollapsedGPUs: map[string][]int{},
+		Version:        CurrentVersion,
+		Window:         Window{Width: DefaultWindowWidth, Height: DefaultWindowHeight},
+		Appearance:     AppearanceSystem,
+		Language:       LanguageEnglish,
+		MonitorRange:   DefaultRange,
+		HistoryRange:   DefaultRange,
+		Curves:         DefaultCurves(),
+		IntervalMS:     DefaultIntervalMS,
+		Hosts:          []Host{},
+		CollapsedGPUs:  map[string][]int{},
+		CollapsedProcs: []string{},
 	}
 }
 
@@ -231,6 +237,7 @@ func (d Data) clone() Data {
 	for k, v := range d.CollapsedGPUs {
 		c.CollapsedGPUs[k] = append([]int{}, v...)
 	}
+	c.CollapsedProcs = append([]string{}, d.CollapsedProcs...)
 	return c
 }
 
@@ -288,6 +295,11 @@ func (d *Data) sanitize() {
 		d.Curves = curves
 	}
 
+	if d.IntervalMS == 0 {
+		d.IntervalMS = DefaultIntervalMS
+	}
+	d.IntervalMS = clampInt(d.IntervalMS, MinIntervalMS, MaxIntervalMS)
+
 	hosts := []Host{}
 	seenHost := map[string]bool{}
 	for _, h := range d.Hosts {
@@ -301,10 +313,6 @@ func (d *Data) sanitize() {
 		if h.Port < 0 || h.Port > 65535 {
 			h.Port = 0
 		}
-		if h.IntervalMS == 0 {
-			h.IntervalMS = DefaultIntervalMS
-		}
-		h.IntervalMS = clampInt(h.IntervalMS, MinIntervalMS, MaxIntervalMS)
 		hosts = append(hosts, h)
 	}
 	d.Hosts = hosts
@@ -328,6 +336,16 @@ func (d *Data) sanitize() {
 		collapsed[k] = list
 	}
 	d.CollapsedGPUs = collapsed
+
+	procs := []string{}
+	seenProc := map[string]bool{}
+	for _, id := range d.CollapsedProcs {
+		if id != "" && !seenProc[id] {
+			seenProc[id] = true
+			procs = append(procs, id)
+		}
+	}
+	d.CollapsedProcs = procs
 }
 
 // 設定操作可能回傳的錯誤.

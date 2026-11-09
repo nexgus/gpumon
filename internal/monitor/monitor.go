@@ -355,18 +355,22 @@ func (m *Manager) Disconnect(id string) error {
 	return nil
 }
 
-// SetInterval 設定主機的取樣間隔並存入設定; 連線中時立即送出 set_interval.
-func (m *Manager) SetInterval(id string, ms int) error {
+// SetInterval 設定所有主機共用的取樣間隔並存入設定, 再對目前有連線的主機送出
+// set_interval. 某台主機送出失敗時只記錄到日誌, 不回傳錯誤.
+func (m *Manager) SetInterval(ms int) error {
 	if !protocol.ValidInterval(ms) {
 		return newErr(CodeInvalid, "The interval %d ms is out of range %d-%d", ms, protocol.MinIntervalMs, protocol.MaxIntervalMs)
 	}
-	if err := m.store.SetHostInterval(id, ms); err != nil {
+	if err := m.store.SetInterval(ms); err != nil {
 		return settingsErr(err)
 	}
 	m.mu.Lock()
-	s := m.sessions[id]
+	sessions := make([]*session, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		sessions = append(sessions, s)
+	}
 	m.mu.Unlock()
-	if s != nil {
+	for _, s := range sessions {
 		s.send(protocol.Command{Cmd: protocol.CmdSetInterval, Ms: &ms})
 	}
 	return nil

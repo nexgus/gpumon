@@ -96,10 +96,6 @@ function replaceHost(id: string, next: HostStatus): void {
   hostsStore.update((list) => list.map((h) => (h.id === id ? next : h)));
 }
 
-function patchHost(id: string, patch: Partial<HostStatus>): void {
-  hostsStore.update((list) => list.map((h) => (h.id === id ? { ...h, ...patch } : h)));
-}
-
 async function refreshHosts(): Promise<void> {
   hostsStore.set(await backend.hosts());
 }
@@ -243,6 +239,22 @@ export async function setGPUCollapsed(hostID: string, gpuID: number, collapsed: 
   await saveSetting("collapsed_gpus", all, () => backend.setGPUCollapsed(hostID, gpuID, collapsed));
 }
 
+// setProcessesCollapsed 記住一台主機的程序卡片是否收合; 監看畫面與歷史畫面共用.
+export async function setProcessesCollapsed(hostID: string, collapsed: boolean): Promise<void> {
+  const ids = new Set(settingsStore.get()?.collapsed_procs ?? []);
+  if (collapsed) {
+    ids.add(hostID);
+  } else {
+    ids.delete(hostID);
+  }
+  await saveSetting("collapsed_procs", [...ids].sort(), () => backend.setProcessesCollapsed(hostID, collapsed));
+}
+
+// setSamplingInterval 變更所有主機共用的取樣間隔, 連線中的主機立即套用.
+export function setSamplingInterval(ms: number): Promise<void> {
+  return saveSetting("interval_ms", ms, () => backend.setInterval(ms));
+}
+
 // 以下為主機的操作.
 
 export async function addHost(conn: HostConn): Promise<HostStatus> {
@@ -302,19 +314,6 @@ export async function disconnect(id: string): Promise<void> {
   try {
     await backend.disconnect(id);
   } catch (err) {
-    reportOperation(hostsStore.get().find((h) => h.id === id)?.name ?? id, err);
-  }
-}
-
-export async function setHostInterval(id: string, ms: number): Promise<void> {
-  const old = hostsStore.get().find((h) => h.id === id)?.interval_ms;
-  patchHost(id, { interval_ms: ms });
-  try {
-    await backend.setInterval(id, ms);
-  } catch (err) {
-    if (old !== undefined) {
-      patchHost(id, { interval_ms: old });
-    }
     reportOperation(hostsStore.get().find((h) => h.id === id)?.name ?? id, err);
   }
 }

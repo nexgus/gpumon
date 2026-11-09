@@ -812,7 +812,7 @@ func TestProcessRecordTiming(t *testing.T) {
 func TestIntervalChangeAndAck(t *testing.T) {
 	e := newEnv(t, testTiming())
 	id := e.addHost("alice", "gpu01")
-	if err := e.m.SetInterval(id, 2000); err != nil {
+	if err := e.m.SetInterval(2000); err != nil {
 		t.Fatal(err)
 	}
 	ls := newLinks()
@@ -828,7 +828,7 @@ func TestIntervalChangeAndAck(t *testing.T) {
 	e.waitLiveTime(id, t0)
 
 	l.ack.Store(false)
-	if err := e.m.SetInterval(id, 500); err != nil {
+	if err := e.m.SetInterval(500); err != nil {
 		t.Fatal(err)
 	}
 	e.eventually("set_interval", time.Second, func() bool {
@@ -839,8 +839,8 @@ func TestIntervalChangeAndAck(t *testing.T) {
 		}
 		return false
 	})
-	if h, _ := e.store.Host(id); h.IntervalMS != 500 {
-		t.Fatalf("setting %d", h.IntervalMS)
+	if iv := e.store.Interval(); iv != 500 {
+		t.Fatalf("setting %d", iv)
 	}
 	l.send(sampleMsg(1001, 1, []int{0}))
 	e.waitLiveTime(id, t0+1_000_000)
@@ -850,10 +850,10 @@ func TestIntervalChangeAndAck(t *testing.T) {
 	if lv, _ := e.m.Live(id); lv.IntervalMS != 500 {
 		t.Fatalf("live interval %d", lv.IntervalMS)
 	}
-	if err := e.m.SetInterval(id, 150); CodeOf(err) != CodeInvalid {
+	if err := e.m.SetInterval(150); CodeOf(err) != CodeInvalid {
 		t.Fatalf("interval 150: %v", err)
 	}
-	if err := e.m.SetInterval(id, 10001); CodeOf(err) != CodeInvalid {
+	if err := e.m.SetInterval(10001); CodeOf(err) != CodeInvalid {
 		t.Fatalf("interval 10001: %v", err)
 	}
 	path := e.status(id).Recording
@@ -868,12 +868,45 @@ func TestIntervalChangeAndAck(t *testing.T) {
 	if want := []uint16{2000, 2000, 500}; !reflect.DeepEqual(ivs, want) {
 		t.Fatalf("intervals %v, want %v", ivs, want)
 	}
-	// 重新連線時以設定中的新值傳入 --interval.
+	// 重新連線時以共用設定中的新值傳入 --interval.
 	e.m.Connect(id)
 	ls.next(t)
 	e.waitState(id, StateConnected)
 	if iv := e.dialer.calls[1].target.IntervalMS; iv != 500 {
 		t.Fatalf("--interval after change %d", iv)
+	}
+}
+
+func TestSetIntervalReachesAllConnectedHosts(t *testing.T) {
+	e := newEnv(t, testTiming())
+	a := e.addHost("alice", "gpu01")
+	b := e.addHost("bob", "gpu02")
+	e.addHost("carol", "gpu03")
+	lsA, lsB := newLinks(), newLinks()
+	e.dialer.set(okDialer(lsA, "alice", nvidiaDevices(0)))
+	e.m.Connect(a)
+	la := lsA.next(t)
+	e.waitState(a, StateConnected)
+	e.dialer.set(okDialer(lsB, "bob", nvidiaDevices(0)))
+	e.m.Connect(b)
+	lb := lsB.next(t)
+	e.waitState(b, StateConnected)
+
+	if err := e.m.SetInterval(700); err != nil {
+		t.Fatal(err)
+	}
+	for name, l := range map[string]*fakeLink{"alice": la, "bob": lb} {
+		e.eventually("set_interval "+name, time.Second, func() bool {
+			for len(l.cmds) > 0 {
+				if c := <-l.cmds; c.Cmd == protocol.CmdSetInterval && *c.Ms == 700 {
+					return true
+				}
+			}
+			return false
+		})
+	}
+	if iv := e.store.Interval(); iv != 700 {
+		t.Fatalf("setting %d", iv)
 	}
 }
 

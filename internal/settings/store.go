@@ -189,7 +189,7 @@ func (s *Store) Host(id string) (Host, bool) {
 	return Host{}, false
 }
 
-// AddHost 於清單末端新增主機, 取樣間隔與顯示範圍使用預設值.
+// AddHost 於清單末端新增主機,
 // 已有相同識別的主機時回傳 ErrDuplicateHost.
 func (s *Store) AddHost(c HostConn) error {
 	c, err := normalizeConn(c)
@@ -200,13 +200,13 @@ func (s *Store) AddHost(c HostConn) error {
 		if findDuplicate(d, c, -1) {
 			return fmt.Errorf("%w: %s", ErrDuplicateHost, c.ID())
 		}
-		d.Hosts = append(d.Hosts, Host{HostConn: c, IntervalMS: DefaultIntervalMS})
+		d.Hosts = append(d.Hosts, Host{HostConn: c})
 		return nil
 	})
 }
 
-// UpdateHost 編輯識別字串為 id 的主機. 只更換表單的四個欄位, 排列位置,
-// 取樣間隔, 顯示範圍與收合狀態皆保留. 新識別與其他主機重複時回傳
+// UpdateHost 編輯識別字串為 id 的主機. 只更換表單的四個欄位, 排列位置與
+// 收合狀態皆保留. 新識別與其他主機重複時回傳
 // ErrDuplicateHost.
 func (s *Store) UpdateHost(id string, c HostConn) error {
 	c, err := normalizeConn(c)
@@ -227,6 +227,12 @@ func (s *Store) UpdateHost(id string, c HostConn) error {
 				delete(d.CollapsedGPUs, id)
 				d.CollapsedGPUs[newID] = ids
 			}
+			for j, p := range d.CollapsedProcs {
+				if p == id {
+					d.CollapsedProcs[j] = newID
+				}
+			}
+			d.CollapsedProcs = dedupStrings(d.CollapsedProcs)
 		}
 		return nil
 	})
@@ -241,23 +247,24 @@ func (s *Store) RemoveHost(id string) error {
 		}
 		d.Hosts = append(d.Hosts[:i], d.Hosts[i+1:]...)
 		delete(d.CollapsedGPUs, id)
+		d.CollapsedProcs = removeString(d.CollapsedProcs, id)
 		return nil
 	})
 }
 
-// SetHostInterval 設定主機的取樣間隔, 單位為毫秒, 範圍 200 至 10000.
-func (s *Store) SetHostInterval(id string, ms int) error {
+// Interval 回傳所有主機共用的取樣間隔, 單位為毫秒.
+func (s *Store) Interval() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.data.IntervalMS
+}
+
+// SetInterval 設定所有主機共用的取樣間隔, 單位為毫秒, 範圍 200 至 10000.
+func (s *Store) SetInterval(ms int) error {
 	if ms < MinIntervalMS || ms > MaxIntervalMS {
 		return invalid("interval %d ms out of range %d-%d", ms, MinIntervalMS, MaxIntervalMS)
 	}
-	return s.update(func(d *Data) error {
-		i := findHost(d, id)
-		if i < 0 {
-			return fmt.Errorf("%w: %s", ErrHostNotFound, id)
-		}
-		d.Hosts[i].IntervalMS = ms
-		return nil
-	})
+	return s.update(func(d *Data) error { d.IntervalMS = ms; return nil })
 }
 
 // SetWindow 記住主視窗的大小與位置.
@@ -372,4 +379,55 @@ func (s *Store) SetGPUCollapsed(hostID string, gpuID int, collapsed bool) error 
 		}
 		return nil
 	})
+}
+
+// ProcsCollapsed 回傳指定主機的程序卡片是否已收合.
+func (s *Store) ProcsCollapsed(hostID string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, id := range s.data.CollapsedProcs {
+		if id == hostID {
+			return true
+		}
+	}
+	return false
+}
+
+// SetProcsCollapsed 記住指定主機的程序卡片是否收合.
+func (s *Store) SetProcsCollapsed(hostID string, collapsed bool) error {
+	if hostID == "" {
+		return invalid("host %q", hostID)
+	}
+	return s.update(func(d *Data) error {
+		if collapsed {
+			d.CollapsedProcs = dedupStrings(append(d.CollapsedProcs, hostID))
+		} else {
+			d.CollapsedProcs = removeString(d.CollapsedProcs, hostID)
+		}
+		return nil
+	})
+}
+
+// removeString 回傳移除所有 v 之後的新切片.
+func removeString(list []string, v string) []string {
+	out := make([]string, 0, len(list))
+	for _, x := range list {
+		if x != v {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
+// dedupStrings 回傳去除重複後的新切片, 保留首次出現的順序.
+func dedupStrings(list []string) []string {
+	seen := make(map[string]bool, len(list))
+	out := make([]string, 0, len(list))
+	for _, x := range list {
+		if !seen[x] {
+			seen[x] = true
+			out = append(out, x)
+		}
+	}
+	return out
 }

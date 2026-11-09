@@ -50,7 +50,6 @@ export interface ChartProps {
   ariaLabel: string;
   // gapTitle 回傳無資料時段懸停讀數的第一行, 例如 "No data 14:29:44 - 14:30:08".
   gapTitle: (start: string, end: string) => string;
-  height?: number;
   // onWidth 回報曲線圖繪圖區的實際寬度 (CSS 像素), 供呼叫端決定查詢的像素寬度.
   onWidth?: (width: number) => void;
   // onHover 回報滑鼠所指的時刻; 滑鼠離開時為 null.
@@ -243,10 +242,28 @@ function ticks(from: number, to: number): string[] {
   return out;
 }
 
-function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, height = 92, onWidth, onHover }: ChartProps) {
+// ChartLegend 為曲線圖的圖例, 含各曲線的名稱與滿刻度說明. 圖例由呼叫端放置, 例如
+// GPU 卡片的標題列.
+export const ChartLegend = memo(function ChartLegend({ series }: { series: ChartSeries[] }) {
+  return (
+    <div className="chart-legend">
+      {series.map((s) => (
+        <span key={s.key} className="chart-legend-item">
+          <span className="chart-legend-swatch" style={{ background: `var(${s.color})` }} />
+          {s.label}
+          {s.scaleLabel && <span className="chart-legend-scale"> {s.scaleLabel}</span>}
+        </span>
+      ))}
+    </div>
+  );
+});
+
+// 曲線圖的高度由外層的版面決定, 繪圖區的寬與高皆隨外框改變而重繪.
+function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHover }: ChartProps) {
   const boxRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [width, setWidth] = useState(0);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  const { width, height } = size;
   const [theme, setTheme] = useState(0);
   const [hover, setHover] = useState<Hover | null>(null);
   const pointer = useRef<number | null>(null);
@@ -256,12 +273,14 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, height = 92, o
     if (!box) {
       return;
     }
-    const ro = new ResizeObserver(() => {
+    const measure = () => {
       const w = Math.floor(box.clientWidth);
-      setWidth(w);
-    });
+      const h = Math.floor(box.clientHeight);
+      setSize((old) => (old.width === w && old.height === h ? old : { width: w, height: h }));
+    };
+    const ro = new ResizeObserver(measure);
     ro.observe(box);
-    setWidth(Math.floor(box.clientWidth));
+    measure();
     return () => ro.disconnect();
   }, []);
 
@@ -275,7 +294,7 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, height = 92, o
 
   useEffect(() => {
     const c = canvasRef.current;
-    if (c && width > 0) {
+    if (c && width > 0 && height > 0) {
       draw(c, width, height, from, to, data, series);
     }
   }, [width, height, from, to, data, series, theme]);
@@ -352,37 +371,24 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, height = 92, o
 
   return (
     <div className="chart">
-      <div className="chart-legend">
-        {series.map((s) => (
-          <span key={s.key} className="chart-legend-item">
-            <span className="chart-legend-swatch" style={{ background: `var(${s.color})` }} />
-            {s.label}
-            {s.scaleLabel && <span className="chart-legend-scale"> {s.scaleLabel}</span>}
-          </span>
-        ))}
+      <div className="chart-yaxis">
+        <span>100</span>
+        <span>50</span>
+        <span>0</span>
       </div>
-      <div className="chart-body">
-        <div className="chart-yaxis" style={{ height }}>
-          <span>100</span>
-          <span>50</span>
-          <span>0</span>
-        </div>
-        <div className="chart-main">
-          <div className="chart-plot" ref={boxRef} onMouseMove={onMove} onMouseLeave={onLeave}>
-            <canvas ref={canvasRef} role="img" aria-label={ariaLabel} style={{ height }} />
-            {hover?.line && <div className="chart-cursor" style={{ left: hover.x }} />}
-            {hover && (
-              <div className="chart-tip" style={{ left: tipLeft, right: tipRight }}>
-                {hover.lines}
-              </div>
-            )}
+      <div className="chart-plot" ref={boxRef} onMouseMove={onMove} onMouseLeave={onLeave}>
+        <canvas ref={canvasRef} role="img" aria-label={ariaLabel} />
+        {hover?.line && <div className="chart-cursor" style={{ left: hover.x }} />}
+        {hover && (
+          <div className="chart-tip" style={{ left: tipLeft, right: tipRight }}>
+            {hover.lines}
           </div>
-          <div className="chart-xaxis">
-            {ticks(from, to).map((s, i) => (
-              <span key={i}>{s}</span>
-            ))}
-          </div>
-        </div>
+        )}
+      </div>
+      <div className="chart-xaxis">
+        {ticks(from, to).map((s, i) => (
+          <span key={i}>{s}</span>
+        ))}
       </div>
     </div>
   );

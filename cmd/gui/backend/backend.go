@@ -191,11 +191,6 @@ func (s *HostService) Connect(id string) error { return toErr(s.b.monitor.Connec
 // Disconnect 中斷連線或停止自動重新連線, 該主機轉為未連線後回傳.
 func (s *HostService) Disconnect(id string) error { return toErr(s.b.monitor.Disconnect(id)) }
 
-// SetInterval 設定取樣間隔 (毫秒, 200 至 10000), 連線中時立即生效.
-func (s *HostService) SetInterval(id string, ms int) error {
-	return toErr(s.b.monitor.SetInterval(id, ms))
-}
-
 // AnswerPrompt 回覆登入密碼或金鑰密碼的輸入要求. 收到後立即轉為位元組陣列, 不另存字串.
 func (s *HostService) AnswerPrompt(promptID string, secret string) error {
 	return toErr(s.b.monitor.AnswerPrompt(promptID, []byte(secret)))

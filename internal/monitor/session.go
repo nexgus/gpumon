@@ -445,7 +445,7 @@ func (s *session) connect(ctx context.Context, reconnect bool) (*conn, error) {
 	if reconnect {
 		timeout = s.m.timing.ReconnectTimeout
 	}
-	interval := h.IntervalMS
+	interval := s.m.store.Interval()
 	if !protocol.ValidInterval(interval) {
 		interval = settings.DefaultIntervalMS
 	}

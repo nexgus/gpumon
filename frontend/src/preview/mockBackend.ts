@@ -92,7 +92,6 @@ function status(id: string, addr: string, user: string, state: HostStatus["state
     port: 0,
     user,
     key_file: "",
-    interval_ms: 1000,
     state,
     reason: "",
     retries: 0,
@@ -125,7 +124,6 @@ function initialHosts(): MockHost[] {
       status: status("alice@gpu-lab-02", "gpu-lab-02", "alice", "reconnecting", {
         reason: "connection timed out",
         retries: 2,
-        interval_ms: 500,
       }),
       devices: devices("gpu-lab-02", [nvidia(0, "NVIDIA GeForce RTX 4090", 24 * GiB, 450, 2850, 10501)]),
       interval: 500,
@@ -170,6 +168,8 @@ const settings: SettingsData = {
   history_range: (params.get("hrange") as SettingsData["history_range"]) ?? "5m",
   curves: (params.get("curves")?.split(",") as SettingsData["curves"]) ?? ["util", "mem"],
   collapsed_gpus: params.get("collapse") === "1" ? { "sweetener@10.90.20.55": [2] } : {},
+  interval_ms: 1000,
+  collapsed_procs: params.get("pcollapse") === "1" ? ["sweetener@10.90.20.55"] : [],
 };
 
 const choices: Choices = {
@@ -542,9 +542,6 @@ export const backend: Backend = {
     h.status = { ...h.status, state: "disconnected", reason: "", retries: 0 };
     emit("monitor:host", { ...h.status });
   },
-  async setInterval(id, ms) {
-    find(id).status.interval_ms = ms;
-  },
   async answerPrompt() {},
   async cancelPrompt() {},
   async confirmUpload() {},
@@ -602,6 +599,18 @@ export const backend: Backend = {
   async setHistoryRange() {},
   async setCurves() {},
   async setGPUCollapsed() {},
+  async setInterval(ms) {
+    settings.interval_ms = ms;
+    for (const h of hosts) {
+      if (h.status.state === "connected") {
+        h.interval = ms;
+      }
+    }
+  },
+  async setProcessesCollapsed(hostID, collapsed) {
+    const rest = (settings.collapsed_procs ?? []).filter((id) => id !== hostID);
+    settings.collapsed_procs = collapsed ? [...rest, hostID].sort() : rest;
+  },
   async about() {
     const windows = params.get("platform") === "windows";
     return {

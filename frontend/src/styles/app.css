@@ -337,17 +337,6 @@ button:disabled {
   color: var(--text-2);
 }
 
-.ctl-value {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  width: 44px;
-}
-
-.slider {
-  width: 110px;
-  accent-color: var(--accent);
-}
-
 .select {
   height: 28px;
   width: 96px;
@@ -400,55 +389,57 @@ button:disabled {
   flex: none;
 }
 
-.host-header {
+/* 卡片. GPU 卡片與程序卡片共用外框與標題, 收合後只留標題一行. */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  flex: none;
+}
+
+.card-collapsed {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 6px 12px;
-  min-height: 44px;
+  height: 34px;
   box-sizing: border-box;
-  padding: 6px 14px;
+  padding: 0 14px;
 }
 
-.host-hostname {
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.host-name {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--text-2);
-}
-
-.host-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-}
-
-.host-note {
+.card-note {
   padding: 14px;
-  border-top: 1px solid var(--border);
   font-size: 12.5px;
   color: var(--text-2);
 }
 
-/* GPU 橫列. */
-.gpu-row {
+.card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: left;
+  min-width: 0;
+}
+
+/* GPU 卡片. */
+.gpu-card {
   display: flex;
   flex-wrap: wrap;
   gap: 8px 16px;
   padding: 10px 14px;
-  border-top: 1px solid var(--border);
 }
 
-.gpu-row.collapsed {
+.gpu-head {
+  flex: 0 0 100%;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  height: 32px;
-  box-sizing: border-box;
-  padding: 0 14px;
+  gap: 4px 16px;
+  min-width: 0;
 }
 
 .gpu-readouts {
@@ -462,20 +453,8 @@ button:disabled {
 .gpu-chart {
   flex: 1 1 420px;
   min-width: 0;
-}
-
-.gpu-title {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  font-size: 12.5px;
-  font-weight: 600;
-  text-align: left;
-  min-width: 0;
+  flex-direction: column;
 }
 
 .gpu-badge {
@@ -550,21 +529,25 @@ button:disabled {
   gap: 1px;
 }
 
-/* 曲線圖. */
+/* 曲線圖. 繪圖區頂端對齊讀數欄頂端, 時間軸刻度底端對齊讀數欄底端. */
 .chart {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  grid-template-rows: minmax(92px, 1fr) auto;
+  column-gap: 6px;
+  row-gap: 3px;
 }
 
+/* 圖例位於 GPU 卡片標題列的右側, 過長時換行並靠右. */
 .chart-legend {
   display: flex;
   flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 4px 14px;
+  margin-left: auto;
   font-size: 11px;
   color: var(--text-2);
-  min-height: 15px;
 }
 
 .chart-legend-item {
@@ -583,13 +566,7 @@ button:disabled {
   white-space: pre;
 }
 
-.chart-body {
-  display: flex;
-  gap: 6px;
-}
-
 .chart-yaxis {
-  width: 22px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -598,27 +575,22 @@ button:disabled {
   font-size: 10px;
   line-height: 1;
   color: var(--text-3);
-  flex: none;
-}
-
-.chart-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
 }
 
 .chart-plot {
   position: relative;
+  min-width: 0;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--surface);
 }
 
 .chart-plot canvas {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
+  height: 100%;
 }
 
 .chart-cursor {
@@ -670,6 +642,7 @@ button:disabled {
 }
 
 .chart-xaxis {
+  grid-column: 2;
   display: flex;
   justify-content: space-between;
   font-family: var(--font-mono);
@@ -678,17 +651,13 @@ button:disabled {
   color: var(--text-3);
 }
 
-/* 程序列表. */
+/* 程序卡片. */
 .procs {
   padding: 8px 14px 12px;
-  border-top: 1px solid var(--border);
 }
 
-.procs-title {
-  padding: 0 0 4px;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--text-2);
+.procs .procs-title {
+  margin: 0 0 6px;
 }
 
 .procs-scroll {
@@ -1015,6 +984,37 @@ button:disabled {
   accent-color: var(--accent);
 }
 
+/* 歷史畫面. 每個記錄檔一個分組, 分組之間的間距大於分組內卡片之間的間距. */
+.history-content {
+  gap: 26px;
+}
+
+.history-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: none;
+}
+
+.history-group-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
+  padding: 0 2px;
+}
+
+.history-group-title {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.history-group-detail {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-2);
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -1069,6 +1069,26 @@ button:disabled {
 
 .settings-select {
   width: 160px;
+}
+
+.settings-slider {
+  width: 160px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-slider input {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+
+.settings-slider-value {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  width: 44px;
+  text-align: right;
 }
 
 /* 上傳通知視窗. */

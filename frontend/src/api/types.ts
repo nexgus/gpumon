@@ -51,7 +51,6 @@ export interface HostConn {
 export interface HostStatus extends HostConn {
   id: string;
   name: string;
-  interval_ms: number;
   state: HostState;
   reason: string;
   retries: number;
@@ -267,6 +266,10 @@ export interface SettingsData {
   history_range: TimeRange;
   curves: Curve[] | null;
   collapsed_gpus: Record<string, number[] | undefined> | null;
+  // interval_ms 為所有主機共用的取樣間隔 (毫秒); collapsed_procs 為程序卡片已收合的
+  // 主機識別字串.
+  interval_ms: number;
+  collapsed_procs: string[] | null;
 }
 
 export interface Choices {
@@ -343,7 +346,6 @@ export interface Backend {
   removeHost(id: string): Promise<void>;
   connect(id: string): Promise<void>;
   disconnect(id: string): Promise<void>;
-  setInterval(id: string, ms: number): Promise<void>;
   answerPrompt(promptID: string, secret: string): Promise<void>;
   cancelPrompt(promptID: string): Promise<void>;
   confirmUpload(noticeID: string): Promise<void>;
@@ -366,6 +368,8 @@ export interface Backend {
   setHistoryRange(v: TimeRange): Promise<void>;
   setCurves(curves: Curve[]): Promise<void>;
   setGPUCollapsed(hostID: string, gpuID: number, collapsed: boolean): Promise<void>;
+  setInterval(ms: number): Promise<void>;
+  setProcessesCollapsed(hostID: string, collapsed: boolean): Promise<void>;
 
   about(): Promise<AboutInfo>;
   // confirmQuit 於使用者在結束確認視窗按下 "結束" 後呼叫, 程式隨即結束.

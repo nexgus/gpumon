@@ -108,7 +108,7 @@ func TestLive(t *testing.T) {
 	}
 	waitFor("samples", 10*time.Second, func() bool { lv, _ := m.Live(id); return lv.HasSample && lv.IntervalMS == 1000 })
 
-	if err := m.SetInterval(id, 500); err != nil {
+	if err := m.SetInterval(500); err != nil {
 		t.Fatal(err)
 	}
 	waitFor("interval ack", 10*time.Second, func() bool { lv, _ := m.Live(id); return lv.IntervalMS == 500 })

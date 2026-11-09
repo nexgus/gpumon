@@ -104,8 +104,8 @@ function JumpForm({ onJump, initial }: { onJump: (us: number) => void; initial: 
   );
 }
 
-// HistoryView 為歷史畫面: 頂端為工具列, 其下為每個記錄檔一個的區塊, 底端為時間捲動條.
-// 所有區塊共用同一個顯示範圍, 捲動範圍為所開啟檔案中最早的開始時刻到最晚的結束時刻.
+// HistoryView 為歷史畫面: 頂端為工具列, 其下為每個記錄檔一個的分組, 底端為時間捲動條.
+// 所有分組共用同一個顯示範圍, 捲動範圍為所開啟檔案中最早的開始時刻到最晚的結束時刻.
 export function HistoryView() {
   const t = useT();
   const paths = useStore(historyStore, (h) => h.paths);
@@ -113,6 +113,7 @@ export function HistoryView() {
   const range = useStore(settingsStore, (s) => s?.history_range) ?? "5m";
   const curves = useStore(settingsStore, (s) => s?.curves) ?? defaultCurves;
   const collapsed = useStore(settingsStore, (s) => s?.collapsed_gpus);
+  const collapsedProcs = useStore(settingsStore, (s) => s?.collapsed_procs);
   const ranges = useStore(choicesStore, (c) => c?.history_ranges) ?? historyRanges;
   const loaded = useInfos(paths);
 
@@ -154,7 +155,7 @@ export function HistoryView() {
         )}
         <RangeSelect value={range} ranges={ranges} onChange={onRange} />
       </div>
-      <div className="content">
+      <div className="content history-content">
         {loaded === null && <div className="empty-note">{t("history.loading")}</div>}
         {loaded?.map((l) =>
           "info" in l ? (
@@ -165,16 +166,17 @@ export function HistoryView() {
               to={to}
               curves={curves}
               collapsedGPUs={collapsed?.[l.info.host]}
+              procsCollapsed={collapsedProcs?.includes(l.info.host) ?? false}
             />
           ) : (
-            <section key={l.path} className="host-block">
-              <header className="host-header all">
-                <span className="host-name">{baseName(l.path)}</span>
+            <div key={l.path} className="history-group">
+              <header className="history-group-head">
+                <span className="history-group-title">{baseName(l.path)}</span>
               </header>
-              <div className="host-note">
+              <div className="card card-note">
                 {t("history.readFailed")} {l.error}
               </div>
-            </section>
+            </div>
           ),
         )}
         {infos.length > 0 && (

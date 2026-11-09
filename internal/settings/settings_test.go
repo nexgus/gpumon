@@ -58,7 +58,7 @@ func TestRoundTrip(t *testing.T) {
 	}
 	must(s.AddHost(HostConn{Addr: "10.0.0.5", Port: 2222, User: "alice", KeyFile: "~/.ssh/k"}))
 	must(s.AddHost(HostConn{Addr: "gpu02"}))
-	must(s.SetHostInterval("alice@10.0.0.5", 500))
+	must(s.SetInterval(500))
 	must(s.SetWindow(Window{Width: 1000, Height: 700, HasPosition: true, X: -50, Y: 20}))
 	must(s.SetAppearance(AppearanceDark))
 	must(s.SetLanguage(LanguageTraditionalChinese))
@@ -69,6 +69,9 @@ func TestRoundTrip(t *testing.T) {
 	must(s.SetGPUCollapsed("alice@10.0.0.5", 0, true))
 	must(s.SetGPUCollapsed("gpu02", 0, true))
 	must(s.SetGPUCollapsed("gpu02", 0, false))
+	must(s.SetProcsCollapsed("alice@10.0.0.5", true))
+	must(s.SetProcsCollapsed("gpu02", true))
+	must(s.SetProcsCollapsed("gpu02", false))
 
 	s2 := mustOpen(t, dir)
 	if !reflect.DeepEqual(s.Snapshot(), s2.Snapshot()) {
@@ -82,7 +85,10 @@ func TestRoundTrip(t *testing.T) {
 		t.Errorf("empty collapsed entry should be removed")
 	}
 	h, _ := s2.Host("alice@10.0.0.5")
-	if h.IntervalMS != 500 || h.Port != 2222 || h.KeyFile != "~/.ssh/k" {
+	if s2.Interval() != 500 || !s2.ProcsCollapsed("alice@10.0.0.5") || s2.ProcsCollapsed("gpu02") {
+		t.Errorf("interval %d procs %v", s2.Interval(), s2.Snapshot().CollapsedProcs)
+	}
+	if h.Port != 2222 || h.KeyFile != "~/.ssh/k" {
 		t.Errorf("host = %+v", h)
 	}
 	entries, _ := os.ReadDir(dir)
@@ -108,8 +114,9 @@ func TestHostLifecycleAndOrder(t *testing.T) {
 	if got := ids(); got != "u@a,u@b,u@c,u@d" {
 		t.Fatalf("order = %s", got)
 	}
-	s.SetHostInterval("u@b", 300)
 	s.SetGPUCollapsed("u@b", 3, true)
+	s.SetProcsCollapsed("u@b", true)
+	s.SetProcsCollapsed("u@c", true)
 	if err := s.UpdateHost("u@b", HostConn{Addr: "bb", User: "v", Port: 22}); err != nil {
 		t.Fatal(err)
 	}
@@ -117,8 +124,11 @@ func TestHostLifecycleAndOrder(t *testing.T) {
 		t.Fatalf("order after edit = %s", got)
 	}
 	h, ok := s.Host("v@bb")
-	if !ok || h.IntervalMS != 300 {
-		t.Errorf("per-host settings lost: %+v", h)
+	if !ok || h.Port != 22 {
+		t.Errorf("host not updated: %+v", h)
+	}
+	if !s.ProcsCollapsed("v@bb") || s.ProcsCollapsed("u@b") || !s.ProcsCollapsed("u@c") {
+		t.Errorf("procs collapse state not migrated on rename: %v", s.Snapshot().CollapsedProcs)
 	}
 	if !s.GPUCollapsed("v@bb", 3) || s.GPUCollapsed("u@b", 3) {
 		t.Errorf("collapse state not migrated on rename")
@@ -139,7 +149,7 @@ func TestHostLifecycleAndOrder(t *testing.T) {
 		t.Errorf("remove missing: %v", err)
 	}
 	s.RemoveHost("v@bb")
-	if len(s.Snapshot().CollapsedGPUs) != 0 {
+	if len(s.Snapshot().CollapsedGPUs) != 0 || s.ProcsCollapsed("v@bb") || !s.ProcsCollapsed("u@c") {
 		t.Errorf("collapse state not removed with host")
 	}
 	if err := s.AddHost(HostConn{Addr: "a", User: "u"}); err != nil {
@@ -202,13 +212,16 @@ func TestHostValidation(t *testing.T) {
 func TestSetterRanges(t *testing.T) {
 	s := mustOpen(t, t.TempDir())
 	s.AddHost(HostConn{Addr: "a", User: "u"})
+	if s.Interval() != DefaultIntervalMS {
+		t.Errorf("default interval = %d", s.Interval())
+	}
 	for _, ms := range []int{199, 10001, 0, -5} {
-		if err := s.SetHostInterval("u@a", ms); !errors.Is(err, ErrInvalidValue) {
+		if err := s.SetInterval(ms); !errors.Is(err, ErrInvalidValue) {
 			t.Errorf("interval %d: %v", ms, err)
 		}
 	}
 	for _, ms := range []int{200, 10000} {
-		if err := s.SetHostInterval("u@a", ms); err != nil {
+		if err := s.SetInterval(ms); err != nil {
 			t.Errorf("interval %d: %v", ms, err)
 		}
 	}
@@ -245,7 +258,10 @@ func TestSetterRanges(t *testing.T) {
 	if err := s.SetGPUCollapsed("u@a", -1, true); err == nil {
 		t.Error("negative gpu id accepted")
 	}
-	if s.Snapshot().Hosts[0].IntervalMS != 10000 {
+	if err := s.SetProcsCollapsed("", true); err == nil {
+		t.Error("empty host id accepted")
+	}
+	if s.Interval() != 10000 {
 		t.Error("failed setters must not change state")
 	}
 }
@@ -275,7 +291,8 @@ func TestLoadOutOfRangeAndInvalid(t *testing.T) {
 	    {"addr": "c d"},
 	    {"addr": "e"}
 	  ],
-	  "collapsed_gpus": {"u@a": [2, 1, 2, -4], "u@b": [], "x": [-1]}
+	  "collapsed_gpus": {"u@a": [2, 1, 2, -4], "u@b": [], "x": [-1]},
+	  "collapsed_procs": ["u@a", "", "u@b", "u@a"]
 	}`)
 	s := mustOpen(t, dir)
 	d := s.Snapshot()
@@ -297,18 +314,28 @@ func TestLoadOutOfRangeAndInvalid(t *testing.T) {
 	if len(d.Hosts) != 3 {
 		t.Fatalf("hosts = %+v", d.Hosts)
 	}
-	a, b, e := d.Hosts[0], d.Hosts[1], d.Hosts[2]
-	if a.Port != 0 || a.IntervalMS != 200 {
+	a, e := d.Hosts[0], d.Hosts[2]
+	if a.Port != 0 {
 		t.Errorf("a = %+v", a)
 	}
-	if b.IntervalMS != 10000 {
-		t.Errorf("b = %+v", b)
-	}
-	if e.ID() != "e" || e.IntervalMS != DefaultIntervalMS {
+	if e.ID() != "e" {
 		t.Errorf("e = %+v", e)
+	}
+	if d.IntervalMS != DefaultIntervalMS {
+		t.Errorf("legacy per-host interval must be ignored: %d", d.IntervalMS)
+	}
+	if !reflect.DeepEqual(d.CollapsedProcs, []string{"u@a", "u@b"}) {
+		t.Errorf("collapsed procs = %v", d.CollapsedProcs)
 	}
 	if !reflect.DeepEqual(d.CollapsedGPUs, map[string][]int{"u@a": {1, 2}}) {
 		t.Errorf("collapsed = %v", d.CollapsedGPUs)
+	}
+
+	for in, want := range map[string]int{`"interval_ms": 50`: 200, `"interval_ms": 99999`: 10000, `"interval_ms": 0`: 1000, `"version": 1`: 1000, `"interval_ms": 2500`: 2500} {
+		writeFile(t, dir, "{"+in+"}")
+		if got := mustOpen(t, dir).Snapshot().IntervalMS; got != want {
+			t.Errorf("%s -> %d, want %d", in, got, want)
+		}
 	}
 
 	writeFile(t, dir, `{"window":{"width":1,"height":50}}`)
@@ -387,7 +414,7 @@ func TestUnknownMembersIgnored(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := s.Snapshot()
-	if d.Language != LanguageTraditionalChinese || len(d.Hosts) != 1 || d.Hosts[0].IntervalMS != 400 {
+	if d.Language != LanguageTraditionalChinese || len(d.Hosts) != 1 || d.IntervalMS != DefaultIntervalMS {
 		t.Errorf("data = %+v", d)
 	}
 }
@@ -498,12 +525,14 @@ func TestSnapshotIsACopy(t *testing.T) {
 	s := mustOpen(t, t.TempDir())
 	s.AddHost(HostConn{Addr: "a"})
 	s.SetGPUCollapsed("a", 0, true)
+	s.SetProcsCollapsed("a", true)
 	d := s.Snapshot()
 	d.Hosts[0].Addr = "zzz"
 	d.Curves[0] = CurveFan
 	d.CollapsedGPUs["a"][0] = 9
+	d.CollapsedProcs[0] = "zzz"
 	d2 := s.Snapshot()
-	if d2.Hosts[0].Addr != "a" || d2.Curves[0] != CurveUtil || d2.CollapsedGPUs["a"][0] != 0 {
+	if d2.Hosts[0].Addr != "a" || d2.Curves[0] != CurveUtil || d2.CollapsedGPUs["a"][0] != 0 || d2.CollapsedProcs[0] != "a" {
 		t.Error("snapshot aliases internal state")
 	}
 	hosts := s.Hosts()
@@ -526,7 +555,8 @@ func TestConcurrentAccess(t *testing.T) {
 				if err := s.AddHost(HostConn{Addr: id, User: "u"}); err != nil {
 					t.Error(err)
 				}
-				s.SetHostInterval("u@"+id, 200+i)
+				s.SetInterval(200 + i)
+				s.SetProcsCollapsed("u@"+id, true)
 				s.SetGPUCollapsed("u@"+id, g, true)
 				s.SetLanguage(LanguageTraditionalChinese)
 				s.Snapshot()

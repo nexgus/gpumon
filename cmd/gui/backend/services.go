@@ -153,6 +153,16 @@ func (s *SettingsService) SetGPUCollapsed(hostID string, gpuID int, collapsed bo
 	return toErr(s.b.store.SetGPUCollapsed(hostID, gpuID, collapsed))
 }
 
+// SetInterval 設定所有主機共用的取樣間隔 (毫秒, 200 至 10000), 連線中的主機立即生效.
+func (s *SettingsService) SetInterval(ms int) error {
+	return toErr(s.b.monitor.SetInterval(ms))
+}
+
+// SetProcessesCollapsed 記住主機 (以 HostStatus.id 指定) 的程序卡片是否收合.
+func (s *SettingsService) SetProcessesCollapsed(hostID string, collapsed bool) error {
+	return toErr(s.b.store.SetProcsCollapsed(hostID, collapsed))
+}
+
 // AppService 提供關於視窗所需的程式資訊與結束程式的確認.
 type AppService struct{ b *Backend }
 

@@ -1,24 +1,43 @@
 import { memo } from "react";
 import type { LiveProcess } from "../api/types";
+import { ChevronDown, ChevronRight } from "../components/Icons";
 import { bytesUnit } from "../format";
 import { useT } from "../i18n";
 
-// ProcessTable 為一台主機的程序列表. title 由呼叫端提供, 例如重新連線中時附上最後
-// 收到的時刻. emptyText 為沒有程序時的說明, 省略時用監看畫面的說明. 監看畫面與歷史
-// 畫面共用.
+// ProcessTable 為一台主機的程序卡片. title 由呼叫端提供, 例如重新連線中時附上最後
+// 收到的時刻. emptyText 為沒有程序時的說明, 省略時用監看畫面的說明. 點選標題切換
+// 收合, 收合後只留標題一行. 監看畫面與歷史畫面共用.
 export const ProcessTable = memo(function ProcessTable({
   title,
   procs,
   emptyText,
+  collapsed,
+  onToggle,
 }: {
   title: string;
   procs: LiveProcess[];
   emptyText?: string;
+  collapsed: boolean;
+  onToggle: (collapsed: boolean) => void;
 }) {
   const t = useT();
+  const head = (
+    <button
+      type="button"
+      className="card-title procs-title"
+      aria-expanded={!collapsed}
+      onClick={() => onToggle(!collapsed)}
+    >
+      {collapsed ? <ChevronRight /> : <ChevronDown />}
+      <span className="ellipsis">{title}</span>
+    </button>
+  );
+  if (collapsed) {
+    return <section className="card card-collapsed">{head}</section>;
+  }
   return (
-    <section className="procs">
-      <div className="procs-title">{title}</div>
+    <section className="card procs">
+      {head}
       <div className="procs-scroll">
         <table className="procs-table">
           <thead>
@@ -46,7 +65,9 @@ export const ProcessTable = memo(function ProcessTable({
               const mem = p.mem === null ? null : bytesUnit(p.mem);
               return (
                 <tr key={`${p.gpu}-${p.pid}`}>
-                  <td>{p.gpu}</td>
+                  <td>
+                    <span className="gpu-badge">{t("monitor.gpu", { id: p.gpu })}</span>
+                  </td>
                   <td className="num">{p.pid}</td>
                   <td>{p.user}</td>
                   <td className={`num${mem ? "" : " na"}`}>

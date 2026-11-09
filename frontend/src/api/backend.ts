@@ -17,7 +17,6 @@ export const backend: Backend = {
   removeHost: (id) => host.RemoveHost(id),
   connect: (id) => host.Connect(id),
   disconnect: (id) => host.Disconnect(id),
-  setInterval: (id, ms) => host.SetInterval(id, ms),
   answerPrompt: (id, secret) => host.AnswerPrompt(id, secret),
   cancelPrompt: (id) => host.CancelPrompt(id),
   confirmUpload: (id) => host.ConfirmUpload(id),
@@ -58,6 +57,8 @@ export const backend: Backend = {
   setHistoryRange: (v) => settings.SetHistoryRange(v),
   setCurves: (curves) => settings.SetCurves(curves),
   setGPUCollapsed: (hostID, gpuID, collapsed) => settings.SetGPUCollapsed(hostID, gpuID, collapsed),
+  setInterval: (ms) => settings.SetInterval(ms),
+  setProcessesCollapsed: (hostID, collapsed) => settings.SetProcessesCollapsed(hostID, collapsed),
 
   about: () => app.About(),
   confirmQuit: () => app.ConfirmQuit(),

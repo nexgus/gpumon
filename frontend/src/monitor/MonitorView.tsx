@@ -10,13 +10,23 @@ import { HostBlock } from "./HostBlock";
 function HostContent({ host }: { host: HostStatus }) {
   const to = useStore(liveStore, (m) => (m[host.id]?.has_sample ? m[host.id].time : 0));
   const collapsed = useStore(settingsStore, (s) => s?.collapsed_gpus?.[host.id]);
+  const procsCollapsed = useStore(settingsStore, (s) => s?.collapsed_procs?.includes(host.id) ?? false);
   const range = useStore(settingsStore, (s) => s?.monitor_range) ?? "5m";
   const curves = useStore(settingsStore, (s) => s?.curves) ?? defaultCurves;
   const span = rangeMicros(range) || rangeMicros("5m");
-  return <HostBlock host={host} from={to - span} to={to} curves={curves} collapsedGPUs={collapsed} />;
+  return (
+    <HostBlock
+      host={host}
+      from={to - span}
+      to={to}
+      curves={curves}
+      collapsedGPUs={collapsed}
+      procsCollapsed={procsCollapsed}
+    />
+  );
 }
 
-// MonitorView 為監看畫面: 頂端為主機分頁, 其下為選取中主機的區塊.
+// MonitorView 為監看畫面: 頂端為主機分頁, 其下為選取中主機的 GPU 卡片與程序卡片.
 export function MonitorView() {
   const t = useT();
   const hosts = useStore(hostsStore, (h) => h);

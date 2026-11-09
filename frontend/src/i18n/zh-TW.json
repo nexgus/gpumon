@@ -28,10 +28,11 @@
 
   "monitor.hostTabs": "主機",
   "monitor.timeRange": "顯示範圍",
-  "monitor.interval": "取樣間隔",
   "monitor.curves": "曲線",
   "monitor.noHosts": "尚未新增主機。新增主機後即可開始監看。",
   "monitor.noGpu": "此主機沒有 GPU Monitor 可監看的 GPU。",
+  "monitor.notConnected": "尚未連線。請使用側欄的「連線」按鍵連線至此主機。",
+  "monitor.connecting": "正在連線至此主機。",
   "monitor.waiting": "正在等待第一筆取樣。",
   "monitor.processes": "程序",
   "monitor.processesLast": "程序（最後收到的時刻 {time}）",
@@ -74,9 +75,6 @@
   "readout.clockGpu": "GPU 時脈",
   "readout.clockMem": "記憶體時脈",
 
-  "proc.user": "使用者",
-  "proc.mem": "GPU 記憶體",
-  "proc.cmd": "指令",
 
   "gap.title": "無資料 {start} - {end}",
   "gap.unknown": "原因不明",
@@ -186,6 +184,8 @@
   "settings.appearanceHint": "跟隨系統即依作業系統的外觀設定。",
   "settings.language": "語言",
   "settings.languageHint": "選擇後立即生效。",
+  "settings.interval": "取樣間隔",
+  "settings.intervalHint": "套用於所有主機，立即生效，連線中的主機亦同。",
   "settings.timeRangeHint": "套用於監看畫面。歷史畫面另有自己的顯示範圍。",
   "settings.curvesHint": "監看畫面與歷史畫面皆畫出勾選的曲線。",
   "appearance.system": "跟隨系統",
