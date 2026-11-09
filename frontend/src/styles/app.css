@@ -1138,7 +1138,6 @@ button:disabled {
 
 /* 設定頁面. */
 .settings-card {
-  max-width: 640px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
