@@ -809,52 +809,30 @@ func TestProcessRecordTiming(t *testing.T) {
 	}
 }
 
-func TestIntervalChangeAndAck(t *testing.T) {
+// GUI 一律以 --interval 200 啟動遠端程式, 不送出 set_interval; 每筆取樣以其所附的取樣
+// 間隔存入記錄檔.
+func TestFixedInterval(t *testing.T) {
 	e := newEnv(t, testTiming())
 	id := e.addHost("alice", "gpu01")
-	if err := e.m.SetInterval(2000); err != nil {
-		t.Fatal(err)
-	}
 	ls := newLinks()
 	e.dialer.set(okDialer(ls, "alice", nvidiaDevices(0)))
 	t0 := e.clock.now().UnixMicro()
 	e.m.Connect(id)
 	l := ls.next(t)
 	e.waitState(id, StateConnected)
-	if iv := e.dialer.calls[0].target.IntervalMS; iv != 2000 {
+	if iv := e.dialer.calls[0].target.IntervalMS; iv != 200 {
 		t.Fatalf("--interval %d", iv)
 	}
 	l.send(sampleMsg(1000, 1, []int{0}))
-	e.waitLiveTime(id, t0)
-
-	l.ack.Store(false)
-	if err := e.m.SetInterval(500); err != nil {
-		t.Fatal(err)
-	}
-	e.eventually("set_interval", time.Second, func() bool {
-		for len(l.cmds) > 0 {
-			if c := <-l.cmds; c.Cmd == protocol.CmdSetInterval && *c.Ms == 500 {
-				return true
-			}
-		}
-		return false
-	})
-	if iv := e.store.Interval(); iv != 500 {
-		t.Fatalf("setting %d", iv)
-	}
-	l.send(sampleMsg(1001, 1, []int{0}))
-	e.waitLiveTime(id, t0+1_000_000)
-	l.send(map[string]any{"type": "ack", "cmd": "set_interval", "ms": 500})
-	l.send(sampleMsg(1001.5, 1, []int{0}))
-	e.waitLiveTime(id, t0+1_500_000)
-	if lv, _ := e.m.Live(id); lv.IntervalMS != 500 {
+	l.send(sampleMsg(1000.2, 1, []int{0}))
+	e.waitLiveTime(id, t0+200_000)
+	if lv, _ := e.m.Live(id); lv.IntervalMS != 200 {
 		t.Fatalf("live interval %d", lv.IntervalMS)
 	}
-	if err := e.m.SetInterval(150); CodeOf(err) != CodeInvalid {
-		t.Fatalf("interval 150: %v", err)
-	}
-	if err := e.m.SetInterval(10001); CodeOf(err) != CodeInvalid {
-		t.Fatalf("interval 10001: %v", err)
+	for len(l.cmds) > 0 {
+		if c := <-l.cmds; c.Cmd == protocol.CmdSetInterval {
+			t.Fatalf("GUI sent set_interval: %+v", c)
+		}
 	}
 	path := e.status(id).Recording
 	e.m.Disconnect(id)
@@ -865,48 +843,14 @@ func TestIntervalChangeAndAck(t *testing.T) {
 			ivs = append(ivs, r.IntervalMS)
 		}
 	}
-	if want := []uint16{2000, 2000, 500}; !reflect.DeepEqual(ivs, want) {
+	if want := []uint16{200, 200}; !reflect.DeepEqual(ivs, want) {
 		t.Fatalf("intervals %v, want %v", ivs, want)
 	}
-	// 重新連線時以共用設定中的新值傳入 --interval.
 	e.m.Connect(id)
 	ls.next(t)
 	e.waitState(id, StateConnected)
-	if iv := e.dialer.calls[1].target.IntervalMS; iv != 500 {
-		t.Fatalf("--interval after change %d", iv)
-	}
-}
-
-func TestSetIntervalReachesAllConnectedHosts(t *testing.T) {
-	e := newEnv(t, testTiming())
-	a := e.addHost("alice", "gpu01")
-	b := e.addHost("bob", "gpu02")
-	e.addHost("carol", "gpu03")
-	lsA, lsB := newLinks(), newLinks()
-	e.dialer.set(okDialer(lsA, "alice", nvidiaDevices(0)))
-	e.m.Connect(a)
-	la := lsA.next(t)
-	e.waitState(a, StateConnected)
-	e.dialer.set(okDialer(lsB, "bob", nvidiaDevices(0)))
-	e.m.Connect(b)
-	lb := lsB.next(t)
-	e.waitState(b, StateConnected)
-
-	if err := e.m.SetInterval(700); err != nil {
-		t.Fatal(err)
-	}
-	for name, l := range map[string]*fakeLink{"alice": la, "bob": lb} {
-		e.eventually("set_interval "+name, time.Second, func() bool {
-			for len(l.cmds) > 0 {
-				if c := <-l.cmds; c.Cmd == protocol.CmdSetInterval && *c.Ms == 700 {
-					return true
-				}
-			}
-			return false
-		})
-	}
-	if iv := e.store.Interval(); iv != 700 {
-		t.Fatalf("setting %d", iv)
+	if iv := e.dialer.calls[1].target.IntervalMS; iv != 200 {
+		t.Fatalf("--interval after reconnect %d", iv)
 	}
 }
 
@@ -920,9 +864,9 @@ func TestQueryIncludesUnsavedSamples(t *testing.T) {
 	l := ls.next(t)
 	e.waitState(id, StateConnected)
 	for i := 0; i < 10; i++ {
-		l.send(sampleMsg(1000+float64(i), i*10, []int{0, 1}))
+		l.send(sampleMsg(1000+0.2*float64(i), i*10, []int{0, 1}))
 		if i == 5 {
-			l.send(protocol.Error{Type: "error", TS: 1005.5, Msg: "nvml timeout"})
+			l.send(protocol.Error{Type: "error", TS: 1001.1, Msg: "nvml timeout"})
 		}
 	}
 	l.send(sampleMsg(1020, 99, []int{0, 1}))
@@ -930,7 +874,7 @@ func TestQueryIncludesUnsavedSamples(t *testing.T) {
 	ctx := context.Background()
 	from, to := t0-60_000_000, t0+30_000_000
 	for _, width := range []int{1000, 5} {
-		before, err := e.m.Query(ctx, id, from, to, width, nil)
+		before, err := e.m.Query(ctx, id, history.Query{From: from, To: to, Width: width})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -949,7 +893,7 @@ func TestQueryIncludesUnsavedSamples(t *testing.T) {
 			}
 		}
 		e.m.recorderRefFor(id).flush()
-		after, err := e.m.Query(ctx, id, from, to, width, nil)
+		after, err := e.m.Query(ctx, id, history.Query{From: from, To: to, Width: width})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -968,7 +912,7 @@ func TestQueryIncludesUnsavedSamples(t *testing.T) {
 	e.waitState(id, StateConnected)
 	l.send(sampleMsg(1, 50, []int{0, 1}))
 	e.waitLiveTime(id, t0+40_000_000)
-	res, err := e.m.Query(ctx, id, from, t0+50_000_000, 1000, []history.Field{history.FieldUtil})
+	res, err := e.m.Query(ctx, id, history.Query{From: from, To: t0 + 50_000_000, Width: 1000, Fields: []history.Field{history.FieldUtil}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -44,6 +44,10 @@ type Timing struct {
 	ProcessRecord time.Duration
 }
 
+// IntervalMS 為 GUI 啟動遠端程式時以 --interval 傳入的取樣間隔, 固定不變; GUI
+// 不送出 set_interval.
+const IntervalMS = 200
+
 // DefaultTiming 回傳規格所定的時間與次數.
 func DefaultTiming() Timing {
 	return Timing{
@@ -66,7 +70,7 @@ type UserResolver func(addr string) (string, error)
 type Options struct {
 	// DataDir 為應用程式資料目錄, 記錄檔位於其下的 history/.
 	DataDir string
-	// Settings 為設定的存取物件, 主機清單與各主機的取樣間隔取自此處.
+	// Settings 為設定的存取物件, 主機清單取自此處.
 	Settings *settings.Store
 	// Dialer 建立連線; nil 時使用 SSHDialer 的零值.
 	Dialer Dialer
@@ -355,27 +359,6 @@ func (m *Manager) Disconnect(id string) error {
 	return nil
 }
 
-// SetInterval 設定所有主機共用的取樣間隔並存入設定, 再對目前有連線的主機送出
-// set_interval. 某台主機送出失敗時只記錄到日誌, 不回傳錯誤.
-func (m *Manager) SetInterval(ms int) error {
-	if !protocol.ValidInterval(ms) {
-		return newErr(CodeInvalid, "The interval %d ms is out of range %d-%d", ms, protocol.MinIntervalMs, protocol.MaxIntervalMs)
-	}
-	if err := m.store.SetInterval(ms); err != nil {
-		return settingsErr(err)
-	}
-	m.mu.Lock()
-	sessions := make([]*session, 0, len(m.sessions))
-	for _, s := range m.sessions {
-		sessions = append(sessions, s)
-	}
-	m.mu.Unlock()
-	for _, s := range sessions {
-		s.send(protocol.Command{Cmd: protocol.CmdSetInterval, Ms: &ms})
-	}
-	return nil
-}
-
 // Live 回傳主機的 devices 資訊, 最新一筆取樣與程序列表.
 func (m *Manager) Live(id string) (Live, error) {
 	if _, ok := m.store.Host(id); !ok {
@@ -390,15 +373,14 @@ func (m *Manager) Live(id string) (Live, error) {
 	return s.liveCopy(), nil
 }
 
-// Query 查詢主機於 [from, to] (Unix 微秒) 的曲線資料, 像素寬度為 width. 範圍內
-// 該主機先前各次連線的記錄檔一併查詢, 連線中者含尚未存檔的取樣. fields 為空時
-// 回傳全部欄位.
-func (m *Manager) Query(ctx context.Context, id string, from, to int64, width int, fields []history.Field) (*history.Result, error) {
+// Query 查詢主機的曲線資料, 條件見 history.Query. 範圍內該主機先前各次連線的記錄檔
+// 一併查詢, 連線中者含尚未存檔的取樣.
+func (m *Manager) Query(ctx context.Context, id string, q history.Query) (*history.Result, error) {
 	h, ok := m.store.Host(id)
 	if !ok {
 		return nil, newErr(CodeNotFound, "Host %s not found", id)
 	}
-	if width < 1 || width > history.MaxWidth || to < from {
+	if q.Width < 1 || q.Width > history.MaxWidth || q.To < q.From {
 		return nil, newErr(CodeInvalid, "Invalid query range or width")
 	}
 	m.mu.Lock()
@@ -413,7 +395,6 @@ func (m *Manager) Query(ctx context.Context, id string, from, to int64, width in
 		rec = s.recorderRef()
 	}
 	paths := m.hostFiles(name)
-	q := history.Query{From: from, To: to, Width: width, Fields: fields}
 	var res *history.Result
 	var err error
 	if rec != nil {

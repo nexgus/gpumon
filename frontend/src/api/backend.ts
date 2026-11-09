@@ -10,6 +10,10 @@ const settings = SettingsService as any;
 const recording = RecordingService as any;
 const app = AppService as any;
 
+// 後端以 JSON 解析參數, 帶小數的數值無法解析為整數型別而使呼叫失敗. 縮放, 平移與點選
+// 曲線圖算出的時刻 (Unix 微秒) 與寬度可能帶小數, 送出前一律四捨五入.
+const int = Math.round;
+
 export const backend: Backend = {
   hosts: () => host.Hosts(),
   addHost: (conn) => host.AddHost(conn),
@@ -22,7 +26,7 @@ export const backend: Backend = {
   confirmUpload: (id) => host.ConfirmUpload(id),
   liveAll: async () => (await host.LiveAll()) ?? [],
   live: (id) => host.Live(id),
-  query: (id, from, to, width, fields) => host.Query(id, from, to, width, fields),
+  query: (id, from, to, width, fields, stats) => host.Query(id, int(from), int(to), int(width), fields, stats),
   chooseKeyFile: (title) => host.ChooseKeyFile(title),
 
   recordings: async () => {
@@ -31,9 +35,9 @@ export const backend: Backend = {
   },
   deleteRecordings: async (paths) => (await recording.Delete(paths)) ?? [],
   recordingInfo: (path) => recording.Info(path),
-  queryRecording: (path, from, to, width, fields) => recording.Query([path], from, to, width, fields),
+  queryRecording: (path, from, to, width, fields) => recording.Query([path], int(from), int(to), int(width), fields),
   processesAt: async (path, t) => {
-    const p = await recording.ProcessesAt(path, t);
+    const p = await recording.ProcessesAt(path, int(t));
     if (!p) {
       return null;
     }
@@ -53,11 +57,10 @@ export const backend: Backend = {
   choices: () => settings.Choices(),
   setAppearance: (v) => settings.SetAppearance(v),
   setLanguage: (v) => settings.SetLanguage(v),
-  setMonitorRange: (v) => settings.SetMonitorRange(v),
-  setHistoryRange: (v) => settings.SetHistoryRange(v),
+  setMonitorSpan: (ms) => settings.SetMonitorSpan(ms),
+  setHistorySpan: (ms, all) => settings.SetHistorySpan(ms, all),
   setCurves: (curves) => settings.SetCurves(curves),
   setGPUCollapsed: (hostID, gpuID, collapsed) => settings.SetGPUCollapsed(hostID, gpuID, collapsed),
-  setInterval: (ms) => settings.SetInterval(ms),
   setProcessesCollapsed: (hostID, collapsed) => settings.SetProcessesCollapsed(hostID, collapsed),
 
   about: () => app.About(),

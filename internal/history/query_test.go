@@ -174,6 +174,62 @@ func TestNoValueExcludedFromStats(t *testing.T) {
 	}
 }
 
+// Stats 為真時, 降採樣的結果另附各像素範圍的取樣筆數與各曲線的總和及筆數, 平均值即為
+// 總和除以筆數; 原始取樣點與未要求時不附.
+func TestQueryStats(t *testing.T) {
+	w := newRec(t, t.TempDir(), "a@b", 0, 0)
+	mem := func(v uint64) *uint64 { return &v }
+	w.AddSample(ts0+0, 1000, []recording.GPUSample{{ID: 0, Util: iv(40)}})
+	w.AddSample(ts0+1, 1000, []recording.GPUSample{{ID: 0, Util: iv(60), MemUsed: mem(1000)}})
+	w.AddSample(ts0+2, 1000, []recording.GPUSample{{ID: 0}})
+	w.AddSample(ts0+3, 1000, []recording.GPUSample{{ID: 0, Util: iv(7)}})
+	w.AddSample(ts0+6, 1000, []recording.GPUSample{{ID: 0, Util: iv(9)}})
+	flush(t, w)
+	paths := []string{w.Path()}
+	q := Query{From: twall, To: twall + 4*sec - 1, Width: 2, Fields: []Field{FieldUtil, FieldMemUsed}, Stats: true}
+	r, err := QueryRange(t.Context(), paths, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.Binned || r.Samples != 4 || r.Last != twall+3*sec {
+		t.Fatalf("result = %+v", r)
+	}
+	if len(r.Counts) != 2 || r.Counts[0] != 2 || r.Counts[1] != 2 {
+		t.Fatalf("counts = %v", r.Counts)
+	}
+	u, m := r.GPUs[0].Fields[FieldUtil], r.GPUs[0].Fields[FieldMemUsed]
+	if u.Sum[0] != 100 || u.Count[0] != 2 || u.Sum[1] != 7 || u.Count[1] != 1 {
+		t.Fatalf("util sum %v count %v", u.Sum, u.Count)
+	}
+	if m.Sum[0] != 1000 || m.Count[0] != 1 || m.Sum[1] != 0 || m.Count[1] != 0 || !nan(m.Avg[1]) {
+		t.Fatalf("mem sum %v count %v avg %v", m.Sum, m.Count, m.Avg)
+	}
+	for i := range u.Avg {
+		if u.Avg[i] != u.Sum[i]/float64(u.Count[i]) {
+			t.Fatalf("avg %v differs from sum/count", u.Avg)
+		}
+	}
+	b, _ := json.Marshal(u)
+	if string(b) != `{"avg":[50,7],"min":[40,7],"max":[60,7],"sum":[100,7],"count":[2,1]}` {
+		t.Fatalf("json = %s", b)
+	}
+
+	q.Stats = false
+	r, _ = QueryRange(t.Context(), paths, q)
+	if r.Counts != nil || r.GPUs[0].Fields[FieldUtil].Sum != nil || r.GPUs[0].Fields[FieldUtil].Count != nil {
+		t.Fatalf("stats without request: %+v", r)
+	}
+	q.Stats, q.Width = true, 10
+	r, _ = QueryRange(t.Context(), paths, q)
+	if r.Binned || r.Counts != nil || r.GPUs[0].Fields[FieldUtil].Sum != nil || r.Last != twall+3*sec {
+		t.Fatalf("raw result with stats: %+v", r)
+	}
+	r, _ = QueryRange(t.Context(), paths, Query{From: twall + 4*sec, To: twall + 5*sec, Width: 10, Stats: true})
+	if r.Samples != 0 || r.Last != 0 {
+		t.Fatalf("empty range: %+v", r)
+	}
+}
+
 func TestIrregularSamplesAndIntervalChange(t *testing.T) {
 	w := newRec(t, t.TempDir(), "a@b", 0, 0)
 	rels := []float64{0, 0.2, 0.4, 5.4, 10.4, 15.4}

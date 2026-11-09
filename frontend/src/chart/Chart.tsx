@@ -4,6 +4,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { onThemeChange } from "../theme";
 import { formatClock, formatClockShort } from "../format";
+import { isMac } from "../platform";
 
 export interface ChartSeries {
   key: string;
@@ -61,6 +62,9 @@ export interface ChartProps {
   pinHint?: string;
   // edge 於歷史畫面傳入, 啟用邊緣提示, 邊緣自動捲動與橫向滾動; 省略時 (監看畫面) 不啟用.
   edge?: ChartEdge;
+  // onZoom 回報繪圖區上按住 Ctrl (macOS 另可按住 ⌘) 的滾輪或觸控板捏合. factor 為顯示範圍
+  // 長度的倍數, 大於 1 為加長; at 為游標位置佔繪圖區寬度的比例. 省略時不攔截這些操作.
+  onZoom?: (factor: number, at: number) => void;
 }
 
 // ChartEdge 為曲線圖的橫向捲動介面. canLeft 與 canRight 表示該側還有資料可捲動.
@@ -93,6 +97,17 @@ const DRAG_THRESHOLD = 4;
 // 放開前取樣速度的時間窗 (毫秒), 與低於此速度 (像素/秒) 不滑動的門檻.
 const VELOCITY_WINDOW_MS = 100;
 const FLING_MIN_SPEED = 300;
+// 縮放時每 ZOOM_WHEEL_UNIT 的滾動量 (像素) 使長度乘以或除以 ZOOM_WHEEL_FACTOR, 不足時依比例
+// 連續變化. 滾動量以行為單位時每行以 WHEEL_LINE 像素計.
+const ZOOM_WHEEL_UNIT = 100;
+const ZOOM_WHEEL_FACTOR = 1.25;
+const WHEEL_LINE = 16;
+
+// WebKitGesture 為 macOS WKWebView 的觸控板捏合事件, scale 為兩指距離相對於開始時的比例.
+interface WebKitGesture extends UIEvent {
+  scale: number;
+  clientX?: number;
+}
 
 interface Gesture {
   x0: number;
@@ -305,7 +320,7 @@ export const ChartLegend = memo(function ChartLegend({ series }: { series: Chart
 });
 
 // 曲線圖的高度由外層的版面決定, 繪圖區的寬與高皆隨外框改變而重繪.
-function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHover, pinned, onPin, pinHint, edge }: ChartProps) {
+function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHover, pinned, onPin, pinHint, edge, onZoom }: ChartProps) {
   const boxRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -315,6 +330,8 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHov
   const pointer = useRef<number | null>(null);
   const edgeRef = useRef(edge);
   edgeRef.current = edge;
+  const zoomRef = useRef(onZoom);
+  zoomRef.current = onZoom;
   const widthRef = useRef(0);
   widthRef.current = width;
   const zone = useRef(0);
@@ -387,15 +404,43 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHov
     };
   }, [resetZone, finishGesture]);
 
-  // 橫向滑動與 Shift 加滾輪. React 的 wheel 監聽為 passive, 無法 preventDefault, 故直接
-  // 掛在元素上. 只攔截橫向移動, 純垂直滾動留給內容區.
+  // 滾輪與捏合. React 的 wheel 監聽為 passive, 無法 preventDefault, 故直接掛在元素上.
+  // 按住 Ctrl (macOS 另可按住 ⌘) 的滾輪縮放, 不捲動; Chromium 核心的 WebView 亦以此形式
+  // 送出觸控板捏合. 其餘只攔截橫向移動與 Shift 加滾輪 (歷史畫面), 純垂直滾動留給內容區.
+  // macOS 的 WKWebView 可能改以 gesturestart, gesturechange, gestureend 送出捏合, 一併
+  // 處理; 捏合進行中略過按住 Ctrl 的滾輪, 避免重複縮放.
   const hasEdge = edge !== undefined;
+  const hasZoom = onZoom !== undefined;
   useEffect(() => {
     const box = boxRef.current;
-    if (!box || !hasEdge) {
+    if (!box || (!hasEdge && !hasZoom)) {
       return;
     }
+    let pinch: number | null = null;
+    const at = (clientX: number | undefined) => {
+      const rect = box.getBoundingClientRect();
+      const x = clientX === undefined ? (pointer.current ?? rect.width / 2) : clientX - rect.left;
+      return Math.min(1, Math.max(0, x / Math.max(1, rect.width)));
+    };
     const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || (isMac && e.metaKey)) {
+        const zoom = zoomRef.current;
+        if (!zoom) {
+          return;
+        }
+        e.preventDefault();
+        let d = e.deltaY;
+        if (pinch !== null || d === 0) {
+          return;
+        }
+        if (e.deltaMode === 1) {
+          d *= WHEEL_LINE;
+        } else if (e.deltaMode === 2) {
+          d *= box.clientHeight;
+        }
+        zoom(Math.pow(ZOOM_WHEEL_FACTOR, d / ZOOM_WHEEL_UNIT), at(e.clientX));
+        return;
+      }
       const ed = edgeRef.current;
       if (!ed || (!ed.canLeft && !ed.canRight)) {
         return;
@@ -408,16 +453,49 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHov
         return;
       }
       if (e.deltaMode === 1) {
-        d *= 16;
+        d *= WHEEL_LINE;
       } else if (e.deltaMode === 2) {
         d *= widthRef.current;
       }
       e.preventDefault();
       ed.onPan(d / Math.max(1, widthRef.current));
     };
+    const onGestureStart = (e: Event) => {
+      if (!zoomRef.current) {
+        return;
+      }
+      e.preventDefault();
+      pinch = (e as WebKitGesture).scale || 1;
+    };
+    const onGestureChange = (e: Event) => {
+      const zoom = zoomRef.current;
+      if (!zoom || pinch === null) {
+        return;
+      }
+      e.preventDefault();
+      const g = e as WebKitGesture;
+      if (g.scale > 0) {
+        zoom(pinch / g.scale, at(g.clientX));
+        pinch = g.scale;
+      }
+    };
+    const onGestureEnd = (e: Event) => {
+      if (pinch !== null) {
+        e.preventDefault();
+        pinch = null;
+      }
+    };
     box.addEventListener("wheel", onWheel, { passive: false });
-    return () => box.removeEventListener("wheel", onWheel);
-  }, [hasEdge]);
+    box.addEventListener("gesturestart", onGestureStart);
+    box.addEventListener("gesturechange", onGestureChange);
+    box.addEventListener("gestureend", onGestureEnd);
+    return () => {
+      box.removeEventListener("wheel", onWheel);
+      box.removeEventListener("gesturestart", onGestureStart);
+      box.removeEventListener("gesturechange", onGestureChange);
+      box.removeEventListener("gestureend", onGestureEnd);
+    };
+  }, [hasEdge, hasZoom]);
 
   useLayoutEffect(() => {
     const box = boxRef.current;

@@ -7,19 +7,21 @@ import { emptyLive, liveStore, setGPUCollapsed, setProcessesCollapsed } from "..
 import { useStore } from "../state/store";
 import { GpuRow } from "./GpuRow";
 import { ProcessTable } from "./ProcessTable";
-import { useCurveFeed } from "./useCurveFeed";
+import { useLiveCurves } from "./useLiveCurves";
 
 const noGPUs: number[] = [];
 const noDevices: Device[] = [];
 
 export interface HostBlockProps {
   host: HostStatus;
-  // from 與 to 為曲線圖的顯示範圍 (Unix 微秒); to 為 0 表示尚無取樣.
-  from: number;
+  // 曲線圖的顯示範圍為 [to - span, to] (Unix 微秒); to 為 0 表示尚無取樣.
+  span: number;
   to: number;
   curves: Curve[];
   collapsedGPUs: number[] | undefined;
   procsCollapsed: boolean;
+  // onZoom 回報曲線圖上的滾輪與捏合縮放, 見 Chart 的 onZoom.
+  onZoom: (factor: number, at: number) => void;
 }
 
 // HostBlock 為監看畫面中一台主機的內容: 每張 GPU 一張卡片, 最後為程序卡片. 沒有 GPU
@@ -46,7 +48,7 @@ export const HostBlock = memo(function HostBlock(p: HostBlockProps) {
   const collapsedGPUs = p.collapsedGPUs ?? noGPUs;
   const anyExpanded = gpus.some((g) => !collapsedGPUs.includes(g.id));
   const fields = useMemo(() => fieldsFor(p.curves), [p.curves]);
-  const result = useCurveFeed(host.id, showsCards && anyExpanded && p.to > 0, p.from, p.to, chartWidth, fields);
+  const result = useLiveCurves(host.id, showsCards && anyExpanded && p.to > 0, p.to, p.span, chartWidth, fields);
 
   const data = useMemo(() => (result ? toChartData(result, t) : null), [result, t]);
   const seriesByGPU = useMemo(() => {
@@ -82,11 +84,12 @@ export const HostBlock = memo(function HostBlock(p: HostBlockProps) {
           gpu={live.has_sample ? live.gpus?.find((x) => x.id === g.id) : undefined}
           collapsed={collapsedGPUs.includes(g.id)}
           onToggle={onToggleGPU}
-          from={p.from}
+          from={p.to - p.span}
           to={p.to}
           data={data}
           series={seriesByGPU.get(g.id) ?? []}
           onWidth={onWidth}
+          onZoom={p.onZoom}
         />
       ))}
       <ProcessTable

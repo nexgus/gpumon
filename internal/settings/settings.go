@@ -17,11 +17,13 @@ const FileName = "settings.json"
 // CurrentVersion 為本套件寫出的設定檔格式版本.
 const CurrentVersion = 1
 
-// 取樣間隔的合法範圍與預設值, 單位為毫秒.
+// 顯示範圍長度的預設值與限制, 單位為毫秒. 監看畫面的長度為 MinSpanMS 至
+// MaxMonitorSpanMS; 歷史畫面的長度於設定檔中只限制不短於 MinSpanMS, 上限依開啟的
+// 記錄檔而定, 由畫面自行限制.
 const (
-	MinIntervalMS     = 200
-	MaxIntervalMS     = 10000
-	DefaultIntervalMS = 1000
+	DefaultSpanMS    int64 = 5 * 60 * 1000
+	MinSpanMS        int64 = 60 * 1000
+	MaxMonitorSpanMS int64 = 24 * 60 * 60 * 1000
 )
 
 // 主視窗大小的預設值與接受的範圍, 單位為像素.
@@ -52,26 +54,6 @@ const (
 	LanguageTraditionalChinese Language = "zh-TW"
 )
 
-// TimeRange 為曲線圖的顯示範圍.
-type TimeRange string
-
-// 顯示範圍的可用值. RangeAll 僅供歷史畫面使用.
-const (
-	Range1Min    TimeRange = "1m"
-	Range5Min    TimeRange = "5m"
-	Range15Min   TimeRange = "15m"
-	Range30Min   TimeRange = "30m"
-	Range60Min   TimeRange = "60m"
-	Range3Hours  TimeRange = "3h"
-	Range6Hours  TimeRange = "6h"
-	Range12Hours TimeRange = "12h"
-	Range24Hours TimeRange = "24h"
-	RangeAll     TimeRange = "all"
-)
-
-// DefaultRange 為所有顯示範圍的預設值.
-const DefaultRange = Range5Min
-
 // Curve 為曲線圖可選的曲線.
 type Curve string
 
@@ -91,17 +73,6 @@ const MaxCurves = 7
 
 // 各項可選值的完整清單. 呼叫端不得修改回傳的切片, 故以函數提供副本.
 
-// MonitorRanges 回傳監看畫面可選的顯示範圍, 由短至長.
-func MonitorRanges() []TimeRange {
-	return []TimeRange{Range1Min, Range5Min, Range15Min, Range30Min, Range60Min,
-		Range3Hours, Range6Hours, Range12Hours, Range24Hours}
-}
-
-// HistoryRanges 回傳歷史畫面可選的顯示範圍, 比監看畫面多 "全部".
-func HistoryRanges() []TimeRange {
-	return append(MonitorRanges(), RangeAll)
-}
-
 // AllCurves 回傳所有可選的曲線.
 func AllCurves() []Curve {
 	return []Curve{CurveUtil, CurveMem, CurveTemp, CurveFan, CurvePower,
@@ -119,19 +90,6 @@ func validAppearance(v Appearance) bool {
 
 func validLanguage(v Language) bool {
 	return v == LanguageEnglish || v == LanguageTraditionalChinese
-}
-
-func validMonitorRange(v TimeRange) bool {
-	for _, r := range MonitorRanges() {
-		if r == v {
-			return true
-		}
-	}
-	return false
-}
-
-func validHistoryRange(v TimeRange) bool {
-	return v == RangeAll || validMonitorRange(v)
 }
 
 func validCurve(v Curve) bool {
@@ -165,7 +123,7 @@ type HostConn struct {
 	KeyFile string `json:"key_file"`
 }
 
-// Host 為一台主機的設定. 舊版設定檔中各主機的 interval_ms 讀取時略過.
+// Host 為一台主機的設定. 舊版設定檔中各主機的 interval_ms 與 range 讀取時略過.
 type Host struct {
 	HostConn
 }
@@ -192,15 +150,14 @@ type Data struct {
 	Appearance Appearance `json:"appearance"`
 	Language   Language   `json:"language"`
 
-	// MonitorRange 為監看畫面的顯示範圍, 所有主機共用.
-	MonitorRange TimeRange `json:"monitor_range"`
-	// HistoryRange 為歷史畫面的顯示範圍.
-	HistoryRange TimeRange `json:"history_range"`
+	// MonitorSpanMS 為監看畫面的顯示範圍長度, 所有主機共用, 單位為毫秒.
+	MonitorSpanMS int64 `json:"monitor_span_ms"`
+	// HistorySpanMS 為歷史畫面的顯示範圍長度, 單位為毫秒. HistoryAll 為歷史畫面
+	// 是否處於顯示全部狀態.
+	HistorySpanMS int64 `json:"history_span_ms"`
+	HistoryAll    bool  `json:"history_all"`
 
 	Curves []Curve `json:"curves"`
-
-	// IntervalMS 為所有主機共用的取樣間隔, 單位為毫秒.
-	IntervalMS int `json:"interval_ms"`
 
 	// Hosts 依新增的先後排列.
 	Hosts []Host `json:"hosts"`
@@ -219,10 +176,9 @@ func Default() Data {
 		Window:         Window{Width: DefaultWindowWidth, Height: DefaultWindowHeight},
 		Appearance:     AppearanceSystem,
 		Language:       LanguageEnglish,
-		MonitorRange:   DefaultRange,
-		HistoryRange:   DefaultRange,
+		MonitorSpanMS:  DefaultSpanMS,
+		HistorySpanMS:  DefaultSpanMS,
 		Curves:         DefaultCurves(),
-		IntervalMS:     DefaultIntervalMS,
 		Hosts:          []Host{},
 		CollapsedGPUs:  map[string][]int{},
 		CollapsedProcs: []string{},
@@ -241,7 +197,7 @@ func (d Data) clone() Data {
 	return c
 }
 
-func clampInt(v, lo, hi int) int {
+func clampInt[T int | int64](v, lo, hi T) T {
 	if v < lo {
 		return lo
 	}
@@ -274,12 +230,8 @@ func (d *Data) sanitize() {
 	if !validLanguage(d.Language) {
 		d.Language = def.Language
 	}
-	if !validMonitorRange(d.MonitorRange) {
-		d.MonitorRange = def.MonitorRange
-	}
-	if !validHistoryRange(d.HistoryRange) {
-		d.HistoryRange = def.HistoryRange
-	}
+	d.MonitorSpanMS = clampInt(d.MonitorSpanMS, MinSpanMS, MaxMonitorSpanMS)
+	d.HistorySpanMS = max(d.HistorySpanMS, MinSpanMS)
 
 	if d.Curves == nil {
 		d.Curves = DefaultCurves()
@@ -294,11 +246,6 @@ func (d *Data) sanitize() {
 		}
 		d.Curves = curves
 	}
-
-	if d.IntervalMS == 0 {
-		d.IntervalMS = DefaultIntervalMS
-	}
-	d.IntervalMS = clampInt(d.IntervalMS, MinIntervalMS, MaxIntervalMS)
 
 	hosts := []Host{}
 	seenHost := map[string]bool{}

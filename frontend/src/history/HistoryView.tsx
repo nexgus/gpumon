@@ -1,27 +1,29 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { backend } from "../api/backend";
 import { serviceError } from "../api/errors";
-import type { RecordingInfo, TimeRange } from "../api/types";
+import type { RecordingInfo } from "../api/types";
 import type { ChartEdge } from "../chart/Chart";
 import { ArrowLeftIcon } from "../components/Icons";
-import { formatClock, formatDateTime, parseDateTime, rangeMicros } from "../format";
+import { formatClock, formatDateTime, parseDateTime } from "../format";
 import { useT } from "../i18n";
-import { RangeSelect } from "../monitor/controls";
+import { ZoomControls } from "../monitor/controls";
 import {
   choicesStore,
   defaultCurves,
   historyStore,
   setHistoryLeft,
   setHistoryPinned,
-  setHistoryRange,
+  setHistorySpan,
   settingsStore,
   showPage,
 } from "../state/app";
 import { useStore } from "../state/store";
 import { HistoryBlock } from "./HistoryBlock";
 
-const historyRanges: TimeRange[] = ["1m", "5m", "15m", "30m", "60m", "3h", "6h", "12h", "24h", "all"];
+// 捲動範圍長度的下限 (微秒), 避免所開啟的記錄檔只有一筆記錄時長度為零.
 const minSpan = 1e6;
+const defaultSpanMS = 300_000;
+const defaultMinMS = 60_000;
 // 邊緣自動捲動每秒移動顯示範圍長度的比例.
 const edgeSpeed = 0.1;
 // 慣性捲動速度的指數衰減時間常數 (秒), 與速度低於此值 (像素/秒) 即停止.
@@ -118,11 +120,12 @@ export function HistoryView() {
   const t = useT();
   const paths = useStore(historyStore, (h) => h.paths);
   const storedLeft = useStore(historyStore, (h) => h.left);
-  const range = useStore(settingsStore, (s) => s?.history_range) ?? "5m";
+  const spanMS = useStore(settingsStore, (s) => s?.history_span_ms) ?? defaultSpanMS;
+  const allSetting = useStore(settingsStore, (s) => s?.history_all) ?? false;
+  const minMS = useStore(choicesStore, (c) => c?.min_span_ms) ?? defaultMinMS;
   const curves = useStore(settingsStore, (s) => s?.curves) ?? defaultCurves;
   const collapsed = useStore(settingsStore, (s) => s?.collapsed_gpus);
   const collapsedProcs = useStore(settingsStore, (s) => s?.collapsed_procs);
-  const ranges = useStore(choicesStore, (c) => c?.history_ranges) ?? historyRanges;
   const pinned = useStore(historyStore, (h) => h.pinned);
   const loaded = useInfos(paths);
 
@@ -167,25 +170,22 @@ export function HistoryView() {
   const infos = useMemo(() => (loaded ?? []).flatMap((l) => ("info" in l ? [l.info] : [])), [loaded]);
   const min = infos.length > 0 ? Math.min(...infos.map((i) => i.start)) : 0;
   const max = infos.length > 0 ? Math.max(...infos.map((i) => i.end)) : 0;
+  // 顯示範圍的長度最短 1 分鐘, 最長為捲動範圍的長度; 捲動範圍短於 1 分鐘時即為捲動範圍
+  // 的長度. 處於顯示全部狀態, 或記住的長度不短於捲動範圍時, 顯示範圍涵蓋整個捲動範圍.
   const total = Math.max(minSpan, max - min);
-  const span = range === "all" ? total : rangeMicros(range) || rangeMicros("5m");
+  const minLen = Math.min(minMS * 1000, total);
+  const stored = Math.max(minLen, spanMS * 1000);
+  const all = allSetting || stored >= total;
+  const span = all ? total : stored;
   const maxLeft = Math.max(min, max - span);
-  const left = range === "all" ? min : Math.min(maxLeft, Math.max(min, storedLeft ?? maxLeft));
+  const left = all ? min : Math.min(maxLeft, Math.max(min, storedLeft ?? maxLeft));
   const to = left + span;
 
-  const onRange = (r: TimeRange) => {
-    stopFling();
-    // 變更顯示範圍時維持目前畫面的中心.
-    const next = r === "all" ? total : rangeMicros(r);
-    setHistoryLeft(left + span / 2 - next / 2);
-    void setHistoryRange(r);
-  };
+  const scrollable = infos.length > 0 && maxLeft > min && !all;
 
-  const scrollable = infos.length > 0 && maxLeft > min && range !== "all";
-
-  // 捲動所需的最新值. 滾輪與自動捲動可能在重新繪製之間連續觸發, 位置以此為準.
-  const view = useRef({ left, span, min, maxLeft, scrollable });
-  view.current = { left, span, min, maxLeft, scrollable };
+  // 捲動與縮放所需的最新值. 滾輪與自動捲動可能在重新繪製之間連續觸發, 位置與長度以此為準.
+  const view = useRef({ left, span, min, max, total, minLen, maxLeft, scrollable });
+  view.current = { left, span, min, max, total, minLen, maxLeft, scrollable };
   const moveBy = useCallback((delta: number): boolean => {
     const v = view.current;
     const next = Math.min(v.maxLeft, Math.max(v.min, v.left + delta));
@@ -274,6 +274,35 @@ export function HistoryView() {
     [scrollable, flinging, left, min, maxLeft, dir, onPan, stopFling, onDrag, onFling],
   );
 
+  // zoom 以 factor 倍變更顯示範圍的長度, 限制於上下限之間, 並使位於 at (佔顯示範圍寬度的
+  // 比例) 的時刻維持不動; 結果超出捲動範圍時平移至捲動範圍內. 長度達捲動範圍的長度即進入
+  // 顯示全部狀態, 縮短即離開.
+  const zoom = useCallback(
+    (factor: number, at: number) => {
+      stopFling();
+      const v = view.current;
+      let next = Math.min(v.total, Math.max(v.minLen, v.span * factor));
+      if (next < v.total) {
+        next = Math.min(v.total, Math.max(v.minLen, Math.round(next / 1000) * 1000));
+      }
+      const toAll = next >= v.total;
+      const anchor = v.left + at * v.span;
+      const nextLeft = toAll ? v.min : Math.min(v.max - next, Math.max(v.min, anchor - at * next));
+      v.span = next;
+      v.left = nextLeft;
+      v.maxLeft = Math.max(v.min, v.max - next);
+      setHistoryLeft(nextLeft);
+      setHistorySpan(next / 1000, toAll, minMS);
+    },
+    [stopFling, minMS],
+  );
+  const onButtonZoom = useCallback((factor: number) => zoom(factor, 0.5), [zoom]);
+  const showAll = () => {
+    stopFling();
+    setHistoryLeft(min);
+    setHistorySpan(total / 1000, true, minMS);
+  };
+
   const sameDay = formatDateTime(min).slice(0, 10) === formatDateTime(max).slice(0, 10);
   const edgeText = (us: number) => (sameDay ? formatClock(us) : formatDateTime(us));
 
@@ -301,17 +330,22 @@ export function HistoryView() {
         )}
         <span className="flex1" />
         {infos.length > 0 && (
-          <JumpForm
-            key={paths.join("\n")}
-            initial={formatDateTime(Math.round((left + span / 2) / 1e6) * 1e6)}
-            onJump={(us) => {
-              stopFling();
-              setHistoryLeft(us - span / 2);
-              setHistoryPinned(Math.min(max, Math.max(min, us)));
-            }}
-          />
+          <>
+            <JumpForm
+              key={paths.join("\n")}
+              initial={formatDateTime(Math.round((left + span / 2) / 1e6) * 1e6)}
+              onJump={(us) => {
+                stopFling();
+                setHistoryLeft(us - span / 2);
+                setHistoryPinned(Math.min(max, Math.max(min, us)));
+              }}
+            />
+            <ZoomControls span={span} min={minLen} max={total} outDisabled={all} onZoom={onButtonZoom} />
+            <button type="button" className="btn" aria-pressed={all} onClick={showAll}>
+              {t("history.showAll")}
+            </button>
+          </>
         )}
-        <RangeSelect value={range} ranges={ranges} onChange={onRange} />
       </div>
       <div className="content history-content">
         {loaded === null && <div className="empty-note">{t("history.loading")}</div>}
@@ -328,6 +362,7 @@ export function HistoryView() {
               pinned={pinned}
               onPin={setHistoryPinned}
               edge={edge}
+              onZoom={zoom}
             />
           ) : (
             <div key={l.path} className="history-group">

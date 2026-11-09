@@ -1,13 +1,14 @@
 // 預覽頁的進入點, 以假後端 (preview/mockBackend.ts) 驅動正式的元件, 供視覺核對.
 // 以 npx vite --config vite.preview.config.ts 啟動, 開啟 /preview.html. 網址參數:
-//   theme=light|dark, lang=en|zh-TW, range=<監看畫面的顯示範圍>, curves=util,mem,...,
+//   theme=light|dark, lang=en|zh-TW, span=<監看畫面的顯示範圍長度, 毫秒>, curves=util,mem,...,
 //   collapse=1 (收合 GPU 2), pcollapse=1 (收合第一台主機的程序卡片), host=<n> (切換至第 n 個
 //   主機分頁, 自 0 起), scenario=design|empty|nogpu, live=0 (不送新取樣),
 //   now=<Unix 秒> (固定目前時刻), dialog=add|edit|delete|password|passphrase|errors|upload|update|queue
 //   (queue 依序送出上傳通知, 錯誤與密碼輸入要求, 只顯示第一個; next=<n> 依序按下前 n 個視窗的主要按鍵),
 //   hover=<0 至 1> (於第 n 張曲線圖的該位置懸停, 歷史畫面中靠近 0 或 1 即位於邊緣區), hoverChart=<n>, pin=<0 至 1> (於第 n 張曲線圖
 //   的該位置點選以固定時刻, n 為 hoverChart),
-//   page=recordings|history|settings (顯示該畫面), hrange=<歷史畫面的顯示範圍>,
+//   page=recordings|history|settings (顯示該畫面), hspan=<歷史畫面的顯示範圍長度, 毫秒>, hall=1 (歷史畫面
+//   處於顯示全部狀態),
 //   select=all|<記錄檔清單由上而下的列號, 以逗號分隔, 自 0 起> (勾選), openrec=1 (按 Open,
 //   顯示歷史畫面), confirmdelete=1 (按 Delete, 顯示確認視窗), goto=<YYYY-MM-DD HH:MM:SS>
 //   (歷史畫面跳至該時刻), dialog=quit (結束確認視窗, count=<主機數>, 預設 2),

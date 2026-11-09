@@ -32,8 +32,9 @@ export interface HistoryBlockProps {
   // 回報該處的時刻.
   pinned: number | null;
   onPin: (t: number) => void;
-  // edge 為曲線圖的橫向捲動介面, 所有分組共用.
+  // edge 為曲線圖的橫向捲動介面, 所有分組共用. onZoom 回報曲線圖上的滾輪與捏合縮放.
   edge: ChartEdge;
+  onZoom: (factor: number, at: number) => void;
 }
 
 // HistoryBlock 為歷史畫面中一個記錄檔的分組: 一行分組標題, 其下為每張 GPU 的卡片與
@@ -49,6 +50,7 @@ export const HistoryBlock = memo(function HistoryBlock({
   pinned,
   onPin,
   edge,
+  onZoom,
 }: HistoryBlockProps) {
   const t = useT();
   const gpus = info.devices?.gpus ?? noDevices;
@@ -142,6 +144,7 @@ export const HistoryBlock = memo(function HistoryBlock({
           onPin={onPin}
           pinHint={pinHint}
           edge={edge}
+          onZoom={onZoom}
         />
       ))}
       {gpus.length > 0 && (

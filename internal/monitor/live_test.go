@@ -106,23 +106,18 @@ func TestLive(t *testing.T) {
 	for _, g := range lv.Devices.GPUs {
 		t.Logf("device %d: %s %s", g.ID, g.Vendor, g.Name)
 	}
-	waitFor("samples", 10*time.Second, func() bool { lv, _ := m.Live(id); return lv.HasSample && lv.IntervalMS == 1000 })
-
-	if err := m.SetInterval(500); err != nil {
-		t.Fatal(err)
-	}
-	waitFor("interval ack", 10*time.Second, func() bool { lv, _ := m.Live(id); return lv.IntervalMS == 500 })
+	waitFor("samples", 10*time.Second, func() bool { lv, _ := m.Live(id); return lv.HasSample && lv.IntervalMS == IntervalMS })
 	var times []int64
-	for len(times) < 6 {
+	for len(times) < 8 {
 		lv, _ := m.Live(id)
 		if len(times) == 0 || lv.Time != times[len(times)-1] {
 			times = append(times, lv.Time)
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 	for i := 2; i < len(times); i++ {
-		if d := times[i] - times[i-1]; d < 400_000 || d > 600_000 {
-			t.Errorf("sample spacing %d us after set_interval 500", d)
+		if d := times[i] - times[i-1]; d < 100_000 || d > 300_000 {
+			t.Errorf("sample spacing %d us with --interval 200", d)
 		}
 	}
 	lv, _ = m.Live(id)
@@ -148,7 +143,7 @@ func TestLive(t *testing.T) {
 		t.Fatal("no samples saved after the batch interval")
 	}
 	t.Logf("saved samples after the first batch: %d, gpus %d", res.Samples, len(res.GPUs))
-	live, err := m.Query(ctx, id, lv.Time-300_000_000, lv.Time+10_000_000, 1000, nil)
+	live, err := m.Query(ctx, id, history.Query{From: lv.Time - 300_000_000, To: lv.Time + 10_000_000, Width: 1000})
 	if err != nil {
 		t.Fatal(err)
 	}

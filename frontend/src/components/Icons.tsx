@@ -41,6 +41,12 @@ export const PlusIcon = () => (
   </Icon>
 );
 
+export const MinusIcon = () => (
+  <Icon>
+    <path d="M5 12h14" />
+  </Icon>
+);
+
 export const RecordingsIcon = () => (
   <Icon size={14}>
     <rect x="3" y="4" width="18" height="5" rx="1" />

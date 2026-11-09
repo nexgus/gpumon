@@ -39,16 +39,6 @@ export function bytesUnit(bytes: number): { value: string; unit: "gib" | "mib" }
   return { value: String(Math.round(bytes / MiB)), unit: "mib" };
 }
 
-// rangeMicros 回傳顯示範圍的長度 (微秒); "all" 回傳 0, 由呼叫端自行決定.
-export function rangeMicros(r: string): number {
-  const m = /^(\d+)(m|h)$/.exec(r);
-  if (!m) {
-    return 0;
-  }
-  const n = Number(m[1]);
-  return n * (m[2] === "h" ? 3600 : 60) * 1e6;
-}
-
 // formatSize 把檔案大小格式化為 KB, MB 或 GB (皆以 1024 進位), 小於 0.1 MB 用 KB,
 // 達 1 GB 用 GB; MB 與 GB 取一位小數.
 export function formatSize(bytes: number, t: Translator): string {

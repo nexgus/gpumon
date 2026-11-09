@@ -89,14 +89,13 @@ func (s *RecordingService) Info(path string) (RecordingInfo, error) {
 // SettingsService 提供設定的讀取與變更. 主機相關的設定見 HostService.
 type SettingsService struct{ b *Backend }
 
-// Choices 為各項設定的可選值.
+// Choices 為各項設定的可選值. MinSpanMS 與 MaxMonitorSpanMS 為顯示範圍長度的下限與
+// 監看畫面的上限, 單位為毫秒.
 type Choices struct {
-	MonitorRanges []settings.TimeRange `json:"monitor_ranges"`
-	HistoryRanges []settings.TimeRange `json:"history_ranges"`
-	Curves        []settings.Curve     `json:"curves"`
-	MaxCurves     int                  `json:"max_curves"`
-	MinIntervalMS int                  `json:"min_interval_ms"`
-	MaxIntervalMS int                  `json:"max_interval_ms"`
+	Curves           []settings.Curve `json:"curves"`
+	MaxCurves        int              `json:"max_curves"`
+	MinSpanMS        int64            `json:"min_span_ms"`
+	MaxMonitorSpanMS int64            `json:"max_monitor_span_ms"`
 }
 
 // Get 回傳全部設定.
@@ -105,9 +104,8 @@ func (s *SettingsService) Get() settings.Data { return s.b.store.Snapshot() }
 // Choices 回傳各項設定的可選值.
 func (s *SettingsService) Choices() Choices {
 	return Choices{
-		MonitorRanges: settings.MonitorRanges(), HistoryRanges: settings.HistoryRanges(),
 		Curves: settings.AllCurves(), MaxCurves: settings.MaxCurves,
-		MinIntervalMS: settings.MinIntervalMS, MaxIntervalMS: settings.MaxIntervalMS,
+		MinSpanMS: settings.MinSpanMS, MaxMonitorSpanMS: settings.MaxMonitorSpanMS,
 	}
 }
 
@@ -129,14 +127,15 @@ func (s *SettingsService) SetLanguage(v settings.Language) error {
 	return nil
 }
 
-// SetMonitorRange 變更監看畫面的顯示範圍, 所有主機共用.
-func (s *SettingsService) SetMonitorRange(v settings.TimeRange) error {
-	return toErr(s.b.store.SetMonitorRange(v))
+// SetMonitorSpan 變更監看畫面的顯示範圍長度 (毫秒, 1 分鐘至 24 小時), 所有主機共用.
+func (s *SettingsService) SetMonitorSpan(ms int64) error {
+	return toErr(s.b.store.SetMonitorSpan(ms))
 }
 
-// SetHistoryRange 變更歷史畫面的顯示範圍, 可為 "all".
-func (s *SettingsService) SetHistoryRange(v settings.TimeRange) error {
-	return toErr(s.b.store.SetHistoryRange(v))
+// SetHistorySpan 變更歷史畫面的顯示範圍長度 (毫秒, 不短於 1 分鐘) 與是否處於顯示全部
+// 狀態.
+func (s *SettingsService) SetHistorySpan(ms int64, all bool) error {
+	return toErr(s.b.store.SetHistorySpan(ms, all))
 }
 
 // SetCurves 變更曲線的選擇, 依傳入的順序保留, 不得重複, 至多 MaxCurves 條, 可為空.
@@ -151,11 +150,6 @@ func (s *SettingsService) SetCurves(curves []settings.Curve) error {
 // 的橫列是否收合.
 func (s *SettingsService) SetGPUCollapsed(hostID string, gpuID int, collapsed bool) error {
 	return toErr(s.b.store.SetGPUCollapsed(hostID, gpuID, collapsed))
-}
-
-// SetInterval 設定所有主機共用的取樣間隔 (毫秒, 200 至 10000), 連線中的主機立即生效.
-func (s *SettingsService) SetInterval(ms int) error {
-	return toErr(s.b.monitor.SetInterval(ms))
 }
 
 // SetProcessesCollapsed 記住主機 (以 HostStatus.id 指定) 的程序卡片是否收合.

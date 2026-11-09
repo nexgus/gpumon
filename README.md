@@ -13,7 +13,7 @@ These are design mockups, not screenshots of the running program.
 - **No remote daemon.** The remote program runs only while the SSH connection is open. It installs no service and leaves no background process.
 - **Multiple vendors.** NVIDIA (NVML), AMD (sysfs), and Intel (sysfs / fdinfo).
 - **Multiple hosts.** One application window can monitor one or more hosts.
-- **Adjustable sampling interval.** The interval can be changed at any time without restarting the remote program.
+- **Fine-grained sampling.** Every host is sampled every 200 ms. The charts zoom smoothly from 1 minute to 24 hours with the toolbar buttons, Ctrl or ⌘ plus the scroll wheel, or a trackpad pinch.
 - **Non-intrusive.** The application does not change any system setting on the remote host.
 - **No stored passwords.** Login passwords and key passphrases are never written to disk or to the operating system's credential store.
 

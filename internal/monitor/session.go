@@ -14,7 +14,6 @@ import (
 
 	"gpumon/internal/protocol"
 	"gpumon/internal/recording"
-	"gpumon/internal/settings"
 	"gpumon/internal/sshconn"
 )
 
@@ -445,10 +444,7 @@ func (s *session) connect(ctx context.Context, reconnect bool) (*conn, error) {
 	if reconnect {
 		timeout = s.m.timing.ReconnectTimeout
 	}
-	interval := s.m.store.Interval()
-	if !protocol.ValidInterval(interval) {
-		interval = settings.DefaultIntervalMS
-	}
+	interval := IntervalMS
 	link, err := s.m.dialer.Dial(ctx, Target{Conn: h.HostConn, IntervalMS: interval, ConnectTimeout: timeout}, s.auth(ctx, reconnect))
 	if err != nil {
 		s.commitPassword(false)

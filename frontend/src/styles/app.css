@@ -105,6 +105,12 @@ button:disabled {
   opacity: 0.4;
 }
 
+.btn[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 .btn:focus-visible,
 .segmented button:focus-visible,
 .host-tab:focus-visible,
@@ -324,6 +330,43 @@ button:disabled {
   border-bottom-color: var(--accent);
   color: var(--text);
   font-weight: 600;
+}
+
+/* 縮放控制項: 縮小按鍵與放大按鍵, 兩者以分隔線隔開. */
+.zoom {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  box-sizing: border-box;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.zoom-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+}
+
+.zoom-btn:disabled {
+  opacity: 0.4;
+}
+
+.zoom-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.zoom-btn + .zoom-btn {
+  border-left: 1px solid var(--border-strong);
 }
 
 .ctl {
@@ -1167,26 +1210,6 @@ button:disabled {
 
 .settings-select {
   width: 160px;
-}
-
-.settings-slider {
-  width: 160px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.settings-slider input {
-  flex: 1;
-  min-width: 0;
-  accent-color: var(--accent);
-}
-
-.settings-slider-value {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  width: 44px;
-  text-align: right;
 }
 
 /* 上傳通知視窗. */

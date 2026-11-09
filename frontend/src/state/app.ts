@@ -15,7 +15,6 @@ import type {
   QuitRequest,
   ServiceError,
   SettingsData,
-  TimeRange,
   UploadNotice,
 } from "../api/types";
 import { setLanguage as applyLanguage } from "../i18n";
@@ -216,12 +215,44 @@ async function saveSetting<K extends keyof SettingsData>(
   }
 }
 
-export function setMonitorRange(v: TimeRange): Promise<void> {
-  return saveSetting("monitor_range", v, () => backend.setMonitorRange(v));
+// 顯示範圍長度於縮放 (例如捏合) 過程中連續改變, 畫面立即更新, 寫入設定檔則於停止改變
+// spanSaveDelay 毫秒後進行一次. 寫入失敗時顯示錯誤, 畫面上的長度維持不變.
+const spanSaveDelay = 400;
+let monitorSpanTimer: number | undefined;
+let historySpanTimer: number | undefined;
+
+// setMonitorSpan 變更監看畫面的顯示範圍長度 (毫秒), 所有主機共用.
+export function setMonitorSpan(ms: number): void {
+  const v = Math.round(ms);
+  if (settingsStore.get()?.monitor_span_ms === v) {
+    return;
+  }
+  patchSettings({ monitor_span_ms: v });
+  window.clearTimeout(monitorSpanTimer);
+  monitorSpanTimer = window.setTimeout(() => {
+    const s = settingsStore.get();
+    if (s) {
+      backend.setMonitorSpan(s.monitor_span_ms).catch((err) => reportOperation("", err));
+    }
+  }, spanSaveDelay);
 }
 
-export function setHistoryRange(v: TimeRange): Promise<void> {
-  return saveSetting("history_range", v, () => backend.setHistoryRange(v));
+// setHistorySpan 變更歷史畫面的顯示範圍長度 (毫秒, 設定檔中不短於 minMS) 與是否處於顯示
+// 全部狀態.
+export function setHistorySpan(ms: number, all: boolean, minMS: number): void {
+  const v = Math.max(minMS, Math.round(ms));
+  const s = settingsStore.get();
+  if (s?.history_span_ms === v && s.history_all === all) {
+    return;
+  }
+  patchSettings({ history_span_ms: v, history_all: all });
+  window.clearTimeout(historySpanTimer);
+  historySpanTimer = window.setTimeout(() => {
+    const cur = settingsStore.get();
+    if (cur) {
+      backend.setHistorySpan(cur.history_span_ms, cur.history_all).catch((err) => reportOperation("", err));
+    }
+  }, spanSaveDelay);
 }
 
 export function setCurves(v: Curve[]): Promise<void> {
@@ -250,11 +281,6 @@ export async function setProcessesCollapsed(hostID: string, collapsed: boolean):
     ids.delete(hostID);
   }
   await saveSetting("collapsed_procs", [...ids].sort(), () => backend.setProcessesCollapsed(hostID, collapsed));
-}
-
-// setSamplingInterval 變更所有主機共用的取樣間隔, 連線中的主機立即套用.
-export function setSamplingInterval(ms: number): Promise<void> {
-  return saveSetting("interval_ms", ms, () => backend.setInterval(ms));
 }
 
 // 以下為主機的操作.

@@ -33,13 +33,13 @@ func TestDefaults(t *testing.T) {
 	if d.Appearance != AppearanceSystem || d.Language != LanguageEnglish {
 		t.Errorf("appearance/language = %v/%v", d.Appearance, d.Language)
 	}
-	if d.MonitorRange != Range5Min || d.HistoryRange != Range5Min {
-		t.Errorf("ranges = %v %v", d.MonitorRange, d.HistoryRange)
+	if d.MonitorSpanMS != 300000 || d.HistorySpanMS != 300000 || d.HistoryAll {
+		t.Errorf("spans = %d %d %v", d.MonitorSpanMS, d.HistorySpanMS, d.HistoryAll)
 	}
 	if !reflect.DeepEqual(d.Curves, []Curve{CurveUtil, CurveMem}) {
 		t.Errorf("curves = %v", d.Curves)
 	}
-	if len(AllCurves()) != MaxCurves || len(MonitorRanges()) != 9 || len(HistoryRanges()) != 10 {
+	if len(AllCurves()) != MaxCurves {
 		t.Errorf("option counts wrong")
 	}
 	if _, err := os.Stat(s.Path()); !errors.Is(err, os.ErrNotExist) {
@@ -58,12 +58,11 @@ func TestRoundTrip(t *testing.T) {
 	}
 	must(s.AddHost(HostConn{Addr: "10.0.0.5", Port: 2222, User: "alice", KeyFile: "~/.ssh/k"}))
 	must(s.AddHost(HostConn{Addr: "gpu02"}))
-	must(s.SetInterval(500))
 	must(s.SetWindow(Window{Width: 1000, Height: 700, HasPosition: true, X: -50, Y: 20}))
 	must(s.SetAppearance(AppearanceDark))
 	must(s.SetLanguage(LanguageTraditionalChinese))
-	must(s.SetMonitorRange(Range24Hours))
-	must(s.SetHistoryRange(RangeAll))
+	must(s.SetMonitorSpan(MaxMonitorSpanMS))
+	must(s.SetHistorySpan(7_654_321, true))
 	must(s.SetCurves([]Curve{CurveTemp, CurveUtil, CurveClockMem}))
 	must(s.SetGPUCollapsed("alice@10.0.0.5", 1, true))
 	must(s.SetGPUCollapsed("alice@10.0.0.5", 0, true))
@@ -85,8 +84,11 @@ func TestRoundTrip(t *testing.T) {
 		t.Errorf("empty collapsed entry should be removed")
 	}
 	h, _ := s2.Host("alice@10.0.0.5")
-	if s2.Interval() != 500 || !s2.ProcsCollapsed("alice@10.0.0.5") || s2.ProcsCollapsed("gpu02") {
-		t.Errorf("interval %d procs %v", s2.Interval(), s2.Snapshot().CollapsedProcs)
+	if d := s2.Snapshot(); d.MonitorSpanMS != MaxMonitorSpanMS || d.HistorySpanMS != 7_654_321 || !d.HistoryAll {
+		t.Errorf("spans = %d %d %v", d.MonitorSpanMS, d.HistorySpanMS, d.HistoryAll)
+	}
+	if !s2.ProcsCollapsed("alice@10.0.0.5") || s2.ProcsCollapsed("gpu02") {
+		t.Errorf("procs %v", s2.Snapshot().CollapsedProcs)
 	}
 	if h.Port != 2222 || h.KeyFile != "~/.ssh/k" {
 		t.Errorf("host = %+v", h)
@@ -212,27 +214,23 @@ func TestHostValidation(t *testing.T) {
 func TestSetterRanges(t *testing.T) {
 	s := mustOpen(t, t.TempDir())
 	s.AddHost(HostConn{Addr: "a", User: "u"})
-	if s.Interval() != DefaultIntervalMS {
-		t.Errorf("default interval = %d", s.Interval())
-	}
-	for _, ms := range []int{199, 10001, 0, -5} {
-		if err := s.SetInterval(ms); !errors.Is(err, ErrInvalidValue) {
-			t.Errorf("interval %d: %v", ms, err)
+	for _, ms := range []int64{59_999, 86_400_001, 0, -5} {
+		if err := s.SetMonitorSpan(ms); !errors.Is(err, ErrInvalidValue) {
+			t.Errorf("monitor span %d: %v", ms, err)
 		}
 	}
-	for _, ms := range []int{200, 10000} {
-		if err := s.SetInterval(ms); err != nil {
-			t.Errorf("interval %d: %v", ms, err)
+	for _, ms := range []int64{60_000, 86_400_000, 123_456} {
+		if err := s.SetMonitorSpan(ms); err != nil {
+			t.Errorf("monitor span %d: %v", ms, err)
 		}
 	}
-	if err := s.SetMonitorRange(RangeAll); !errors.Is(err, ErrInvalidValue) {
-		t.Errorf("monitor range must not accept all: %v", err)
+	for _, ms := range []int64{59_999, 0, -5} {
+		if err := s.SetHistorySpan(ms, false); !errors.Is(err, ErrInvalidValue) {
+			t.Errorf("history span %d: %v", ms, err)
+		}
 	}
-	if err := s.SetMonitorRange("2m"); !errors.Is(err, ErrInvalidValue) {
-		t.Error("bad monitor range accepted")
-	}
-	if err := s.SetHistoryRange(RangeAll); err != nil {
-		t.Error(err)
+	if err := s.SetHistorySpan(30*86_400_000, true); err != nil {
+		t.Errorf("history span has no upper limit in the settings file: %v", err)
 	}
 	if err := s.SetAppearance("blue"); err == nil {
 		t.Error("bad appearance accepted")
@@ -261,8 +259,8 @@ func TestSetterRanges(t *testing.T) {
 	if err := s.SetProcsCollapsed("", true); err == nil {
 		t.Error("empty host id accepted")
 	}
-	if s.Interval() != 10000 {
-		t.Error("failed setters must not change state")
+	if d := s.Snapshot(); d.MonitorSpanMS != 123_456 || d.HistorySpanMS != 30*86_400_000 || !d.HistoryAll {
+		t.Errorf("failed setters must not change state: %+v", d)
 	}
 }
 
@@ -305,8 +303,8 @@ func TestLoadOutOfRangeAndInvalid(t *testing.T) {
 	if d.Appearance != AppearanceSystem || d.Language != LanguageEnglish {
 		t.Errorf("enums not defaulted: %v %v", d.Appearance, d.Language)
 	}
-	if d.MonitorRange != Range5Min || d.HistoryRange != Range5Min {
-		t.Errorf("ranges = %v %v", d.MonitorRange, d.HistoryRange)
+	if d.MonitorSpanMS != DefaultSpanMS || d.HistorySpanMS != DefaultSpanMS || d.HistoryAll {
+		t.Errorf("invalid legacy ranges must give defaults: %d %d %v", d.MonitorSpanMS, d.HistorySpanMS, d.HistoryAll)
 	}
 	if !reflect.DeepEqual(d.Curves, []Curve{CurveUtil, CurvePower}) {
 		t.Errorf("curves = %v", d.Curves)
@@ -321,9 +319,6 @@ func TestLoadOutOfRangeAndInvalid(t *testing.T) {
 	if e.ID() != "e" {
 		t.Errorf("e = %+v", e)
 	}
-	if d.IntervalMS != DefaultIntervalMS {
-		t.Errorf("legacy per-host interval must be ignored: %d", d.IntervalMS)
-	}
 	if !reflect.DeepEqual(d.CollapsedProcs, []string{"u@a", "u@b"}) {
 		t.Errorf("collapsed procs = %v", d.CollapsedProcs)
 	}
@@ -331,10 +326,18 @@ func TestLoadOutOfRangeAndInvalid(t *testing.T) {
 		t.Errorf("collapsed = %v", d.CollapsedGPUs)
 	}
 
-	for in, want := range map[string]int{`"interval_ms": 50`: 200, `"interval_ms": 99999`: 10000, `"interval_ms": 0`: 1000, `"version": 1`: 1000, `"interval_ms": 2500`: 2500} {
+	for in, want := range map[string][2]int64{
+		`"monitor_span_ms": 1000, "history_span_ms": 1000`:               {60_000, 60_000},
+		`"monitor_span_ms": -5, "history_span_ms": 0`:                    {60_000, 60_000},
+		`"monitor_span_ms": 99999999999, "history_span_ms": 99999999999`: {86_400_000, 99999999999},
+		`"monitor_span_ms": 90000, "history_span_ms": 4000000`:           {90_000, 4_000_000},
+		`"monitor_span_ms": "5m", "history_span_ms": 1.5`:                {DefaultSpanMS, DefaultSpanMS},
+		`"version": 1`: {DefaultSpanMS, DefaultSpanMS},
+	} {
 		writeFile(t, dir, "{"+in+"}")
-		if got := mustOpen(t, dir).Snapshot().IntervalMS; got != want {
-			t.Errorf("%s -> %d, want %d", in, got, want)
+		d := mustOpen(t, dir).Snapshot()
+		if got := [2]int64{d.MonitorSpanMS, d.HistorySpanMS}; got != want {
+			t.Errorf("%s -> %v, want %v", in, got, want)
 		}
 	}
 
@@ -349,36 +352,52 @@ func TestLoadLegacyRanges(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, `{
 	  "version": 1,
-	  "view_mode": "all", "shared_range": "15m",
-	  "hosts": [{"addr": "a", "user": "u", "range": "3h"}]
+	  "view_mode": "all", "shared_range": "15m", "interval_ms": 500,
+	  "hosts": [{"addr": "a", "user": "u", "range": "3h", "interval_ms": 2000}]
 	}`)
 	s := mustOpen(t, dir)
-	if d := s.Snapshot(); d.MonitorRange != Range15Min {
-		t.Errorf("shared_range not carried over: %v", d.MonitorRange)
+	if d := s.Snapshot(); d.MonitorSpanMS != 900_000 || d.HistorySpanMS != DefaultSpanMS || d.HistoryAll {
+		t.Errorf("shared_range not carried over: %+v", d)
 	}
-	if err := s.SetHistoryRange(Range1Min); err != nil {
+	if err := s.SetHistorySpan(60_000, false); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(s.Path())
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"view_mode", "shared_range", `"range"`} {
+	for _, key := range []string{"view_mode", "shared_range", `"range"`, "interval_ms", "monitor_range", "history_range"} {
 		if strings.Contains(string(raw), key) {
 			t.Errorf("rewritten file still has %s: %s", key, raw)
 		}
 	}
-	if !strings.Contains(string(raw), `"monitor_range": "15m"`) {
-		t.Errorf("monitor_range missing: %s", raw)
+	if !strings.Contains(string(raw), `"monitor_span_ms": 900000`) {
+		t.Errorf("monitor_span_ms missing: %s", raw)
 	}
 
-	writeFile(t, dir, `{"shared_range": "all", "monitor_range": "1h"}`)
-	if d := mustOpen(t, dir).Snapshot(); d.MonitorRange != Range5Min {
-		t.Errorf("invalid monitor_range should default: %v", d.MonitorRange)
+	cases := []struct {
+		in       string
+		mon, his int64
+		all      bool
+	}{
+		{`{"monitor_range": "24h", "history_range": "12h"}`, 86_400_000, 43_200_000, false},
+		{`{"monitor_range": "1m", "history_range": "all"}`, 60_000, DefaultSpanMS, true},
+		{`{"shared_range": "all", "monitor_range": "1h"}`, DefaultSpanMS, DefaultSpanMS, false},
+		{`{"shared_range": "30m", "monitor_range": "6h"}`, 21_600_000, DefaultSpanMS, false},
+		{`{"shared_range": "30m"}`, 1_800_000, DefaultSpanMS, false},
+		{`{"monitor_range": "all", "history_range": "7m"}`, DefaultSpanMS, DefaultSpanMS, false},
+		{`{"monitor_range": 5, "history_range": ["all"]}`, DefaultSpanMS, DefaultSpanMS, false},
+		{`{"monitor_span_ms": 120000, "monitor_range": "24h", "shared_range": "3h"}`, 120_000, DefaultSpanMS, false},
+		{`{"history_span_ms": 180000, "history_range": "all"}`, DefaultSpanMS, 180_000, false},
+		{`{"history_all": false, "history_range": "all"}`, DefaultSpanMS, DefaultSpanMS, false},
+		{`{"history_span_ms": 180000, "history_all": true, "history_range": "60m"}`, DefaultSpanMS, 180_000, true},
 	}
-	writeFile(t, dir, `{"shared_range": "30m", "monitor_range": "6h"}`)
-	if d := mustOpen(t, dir).Snapshot(); d.MonitorRange != Range6Hours {
-		t.Errorf("monitor_range must win: %v", d.MonitorRange)
+	for _, c := range cases {
+		writeFile(t, dir, c.in)
+		d := mustOpen(t, dir).Snapshot()
+		if d.MonitorSpanMS != c.mon || d.HistorySpanMS != c.his || d.HistoryAll != c.all {
+			t.Errorf("%s -> %d %d %v, want %d %d %v", c.in, d.MonitorSpanMS, d.HistorySpanMS, d.HistoryAll, c.mon, c.his, c.all)
+		}
 	}
 }
 
@@ -414,7 +433,7 @@ func TestUnknownMembersIgnored(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := s.Snapshot()
-	if d.Language != LanguageTraditionalChinese || len(d.Hosts) != 1 || d.IntervalMS != DefaultIntervalMS {
+	if d.Language != LanguageTraditionalChinese || len(d.Hosts) != 1 {
 		t.Errorf("data = %+v", d)
 	}
 }
@@ -555,7 +574,7 @@ func TestConcurrentAccess(t *testing.T) {
 				if err := s.AddHost(HostConn{Addr: id, User: "u"}); err != nil {
 					t.Error(err)
 				}
-				s.SetInterval(200 + i)
+				s.SetMonitorSpan(60_000 + int64(i))
 				s.SetProcsCollapsed("u@"+id, true)
 				s.SetGPUCollapsed("u@"+id, g, true)
 				s.SetLanguage(LanguageTraditionalChinese)

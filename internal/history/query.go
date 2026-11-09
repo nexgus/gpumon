@@ -20,8 +20,11 @@ const (
 	defaultIntervalMS = 1000
 	// 主要範圍每次讀取的記錄筆數, 決定串流時的暫存用量.
 	chunkRecords = 2048
-	// 範圍前後尋找相鄰取樣時每次讀取的起始筆數.
+	// 範圍後尋找下一筆取樣時每次讀取的筆數.
 	scanRecords = 4096
+	// 範圍前尋找前一筆取樣時第一次讀取的筆數, 之後每次加倍. 監看畫面每筆取樣的增量查詢
+	// 範圍很短, 起始筆數小可避免每次都讀取大量記錄.
+	scanBackRecords = 64
 )
 
 // Query 為曲線查詢的條件.
@@ -32,6 +35,9 @@ type Query struct {
 	Width int
 	// Fields 為要回傳的欄位, 為空時回傳全部欄位.
 	Fields []Field
+	// Stats 為真時, 降採樣的結果另附各像素範圍的取樣筆數與各曲線的總和及筆數, 供呼叫端
+	// 把之後的取樣併入同一組像素範圍.
+	Stats bool
 }
 
 type queryFile struct {
@@ -61,6 +67,7 @@ type engine struct {
 	cur *queryFile
 
 	samples int
+	last    int64
 	rawOK   bool
 	times   []int64
 	rows    []float64
@@ -68,6 +75,7 @@ type engine struct {
 
 	sum, mn, mx []float64
 	cnt         []uint32
+	binSamples  []uint32
 	binBrk      []int
 
 	hasPrev bool
@@ -214,6 +222,9 @@ func (e *engine) setup(files []*queryFile) {
 	e.mn = make([]float64, n)
 	e.mx = make([]float64, n)
 	e.cnt = make([]uint32, n)
+	if e.q.Stats {
+		e.binSamples = make([]uint32, e.q.Width)
+	}
 	e.gpuIDs = ids
 }
 
@@ -282,7 +293,7 @@ func (e *engine) runFile(ctx context.Context, qf *queryFile) error {
 
 // scanBack 往前讀取範圍起點之前的記錄, 直到取得至少一筆取樣, 以得知範圍前最近的取樣與其後的事件.
 func (e *engine) scanBack(ctx context.Context, qf *queryFile, lo int) error {
-	for c := scanRecords; ; c *= 2 {
+	for c := scanBackRecords; ; c *= 2 {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -401,6 +412,10 @@ func fieldValue(g *recording.GPUValues, f Field) (float64, bool) {
 
 func (e *engine) addSample(rec *recording.Record, bin int) {
 	e.samples++
+	e.last = rec.Time
+	if e.binSamples != nil {
+		e.binSamples[bin]++
+	}
 	if e.rawOK && e.samples > e.q.Width {
 		e.rawOK = false
 		e.times, e.rows, e.rawBrk = nil, nil, nil
@@ -444,7 +459,7 @@ func (e *engine) addSample(rec *recording.Record, bin int) {
 
 func (e *engine) result(files []*queryFile) *Result {
 	res := &Result{
-		From: e.q.From, To: e.q.To, Width: e.q.Width, Samples: e.samples,
+		From: e.q.From, To: e.q.To, Width: e.q.Width, Samples: e.samples, Last: e.last,
 		Binned: !e.rawOK, Breaks: []int{}, Gaps: e.gaps, GPUs: make([]GPUCurves, e.nGPU),
 	}
 	if res.Gaps == nil {
@@ -479,10 +494,17 @@ func (e *engine) result(files []*queryFile) *Result {
 	if e.binBrk != nil {
 		res.Breaks = e.binBrk
 	}
+	if e.q.Stats {
+		res.Counts = e.binSamples
+	}
 	for u := 0; u < e.nGPU; u++ {
 		for fi, f := range e.fields {
 			s := u*nf + fi
 			c := &Curve{Avg: make(Values, w), Min: make(Values, w), Max: make(Values, w)}
+			if e.q.Stats {
+				c.Sum = Values(e.sum[s*w : (s+1)*w])
+				c.Count = e.cnt[s*w : (s+1)*w]
+			}
 			for i := 0; i < w; i++ {
 				k := s*w + i
 				if e.cnt[k] == 0 {

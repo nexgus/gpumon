@@ -5,7 +5,6 @@ export type HostState = "disconnected" | "connecting" | "connected" | "reconnect
 
 export type Appearance = "system" | "light" | "dark";
 export type Language = "en" | "zh-TW";
-export type TimeRange = "1m" | "5m" | "15m" | "30m" | "60m" | "3h" | "6h" | "12h" | "24h" | "all";
 export type Curve = "util" | "mem" | "temp" | "fan" | "power" | "clock_gpu" | "clock_mem";
 export type Field =
   | "util"
@@ -162,10 +161,13 @@ export interface UploadClosed {
 // SeriesValues 為一條曲線的數值, 留空的位置為 null.
 export type SeriesValues = (number | null)[];
 
+// sum 與 count 只於以 stats 查詢且降採樣時提供, 為各像素範圍內有值的取樣的總和與筆數.
 export interface SeriesData {
   avg: SeriesValues;
   min?: SeriesValues;
   max?: SeriesValues;
+  sum?: SeriesValues;
+  count?: number[];
 }
 
 export interface GPUCurves {
@@ -183,12 +185,16 @@ export interface Gap {
 }
 
 // QueryResult 為曲線查詢的結果, 意義見 internal/history 的 Result.
+// last 為範圍內最後一筆取樣的時刻; counts 只於以 stats 查詢且降採樣時提供, 為各像素
+// 範圍內的取樣筆數.
 export interface QueryResult {
   from: number;
   to: number;
   width: number;
   binned: boolean;
   samples: number;
+  last: number;
+  counts?: number[] | null;
   times: number[];
   breaks: number[] | null;
   gpus: GPUCurves[] | null;
@@ -262,23 +268,23 @@ export interface SettingsData {
   window: WindowSettings;
   appearance: Appearance;
   language: Language;
-  monitor_range: TimeRange;
-  history_range: TimeRange;
+  // monitor_span_ms 與 history_span_ms 為監看畫面與歷史畫面的顯示範圍長度 (毫秒);
+  // history_all 為歷史畫面是否處於顯示全部狀態.
+  monitor_span_ms: number;
+  history_span_ms: number;
+  history_all: boolean;
   curves: Curve[] | null;
   collapsed_gpus: Record<string, number[] | undefined> | null;
-  // interval_ms 為所有主機共用的取樣間隔 (毫秒); collapsed_procs 為程序卡片已收合的
-  // 主機識別字串.
-  interval_ms: number;
+  // collapsed_procs 為程序卡片已收合的主機識別字串.
   collapsed_procs: string[] | null;
 }
 
+// min_span_ms 與 max_monitor_span_ms 為顯示範圍長度的下限與監看畫面的上限 (毫秒).
 export interface Choices {
-  monitor_ranges: TimeRange[];
-  history_ranges: TimeRange[];
   curves: Curve[];
   max_curves: number;
-  min_interval_ms: number;
-  max_interval_ms: number;
+  min_span_ms: number;
+  max_monitor_span_ms: number;
 }
 
 // ServiceError 為服務方法失敗時的錯誤內容; message 為英文.
@@ -351,7 +357,8 @@ export interface Backend {
   confirmUpload(noticeID: string): Promise<void>;
   liveAll(): Promise<Live[]>;
   live(id: string): Promise<Live>;
-  query(id: string, from: number, to: number, width: number, fields: Field[]): Promise<QueryResult | null>;
+  // stats 為真時, 降採樣的結果另附 counts, sum 與 count, 見 QueryResult.
+  query(id: string, from: number, to: number, width: number, fields: Field[], stats: boolean): Promise<QueryResult | null>;
   chooseKeyFile(title: string): Promise<string>;
 
   recordings(): Promise<RecordingListing>;
@@ -364,11 +371,10 @@ export interface Backend {
   choices(): Promise<Choices>;
   setAppearance(v: Appearance): Promise<void>;
   setLanguage(v: Language): Promise<void>;
-  setMonitorRange(v: TimeRange): Promise<void>;
-  setHistoryRange(v: TimeRange): Promise<void>;
+  setMonitorSpan(ms: number): Promise<void>;
+  setHistorySpan(ms: number, all: boolean): Promise<void>;
   setCurves(curves: Curve[]): Promise<void>;
   setGPUCollapsed(hostID: string, gpuID: number, collapsed: boolean): Promise<void>;
-  setInterval(ms: number): Promise<void>;
   setProcessesCollapsed(hostID: string, collapsed: boolean): Promise<void>;
 
   about(): Promise<AboutInfo>;

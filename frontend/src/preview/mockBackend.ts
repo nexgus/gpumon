@@ -75,10 +75,12 @@ function devices(hostname: string, gpus: Device[]): Devices {
   return { type: "devices", protocol: 1, version: "0.1.0", hostname, gpus };
 }
 
+// GUI 一律以 200 ms 取樣.
+const intervalMS = 200;
+
 interface MockHost {
   status: HostStatus;
   devices: Devices | null;
-  interval: number;
   // lastAt 為重新連線中的主機最後一筆取樣距今的微秒數.
   lastAgo: number;
   seed: number;
@@ -116,7 +118,6 @@ function initialHosts(): MockHost[] {
         nvidia(1, "NVIDIA RTX PRO 6000 Blackwell", 95.6 * GiB, 600, 2850, 10501),
         intel,
       ]),
-      interval: 1000,
       lastAgo: 0,
       seed: 1,
     },
@@ -126,21 +127,18 @@ function initialHosts(): MockHost[] {
         retries: 2,
       }),
       devices: devices("gpu-lab-02", [nvidia(0, "NVIDIA GeForce RTX 4090", 24 * GiB, 450, 2850, 10501)]),
-      interval: 500,
       lastAgo: 31e6,
       seed: 2,
     },
     {
       status: status("bob@render-farm", "render-farm", "bob", "disconnected", { reason: "no response from the remote host" }),
       devices: null,
-      interval: 1000,
       lastAgo: 0,
       seed: 3,
     },
     {
       status: status("carol@10.0.8.21", "10.0.8.21", "carol", "connecting"),
       devices: null,
-      interval: 1000,
       lastAgo: 0,
       seed: 4,
     },
@@ -149,7 +147,6 @@ function initialHosts(): MockHost[] {
     list.push({
       status: status("erin@build-01", "build-01", "erin", "connected"),
       devices: devices("build-01", []),
-      interval: 1000,
       lastAgo: 0,
       seed: 5,
     });
@@ -164,21 +161,19 @@ const settings: SettingsData = {
   window: { width: 1280, height: 800, has_position: false, x: 0, y: 0 },
   appearance: (params.get("theme") as SettingsData["appearance"]) ?? "system",
   language: (params.get("lang") as SettingsData["language"]) ?? "en",
-  monitor_range: (params.get("range") as SettingsData["monitor_range"]) ?? "5m",
-  history_range: (params.get("hrange") as SettingsData["history_range"]) ?? "5m",
+  monitor_span_ms: Number(params.get("span") ?? 300_000),
+  history_span_ms: Number(params.get("hspan") ?? 300_000),
+  history_all: params.get("hall") === "1",
   curves: (params.get("curves")?.split(",") as SettingsData["curves"]) ?? ["util", "mem"],
   collapsed_gpus: params.get("collapse") === "1" ? { "sweetener@10.90.20.55": [2] } : {},
-  interval_ms: 1000,
   collapsed_procs: params.get("pcollapse") === "1" ? ["sweetener@10.90.20.55"] : [],
 };
 
 const choices: Choices = {
-  monitor_ranges: ["1m", "5m", "15m", "30m", "60m", "3h", "6h", "12h", "24h"],
-  history_ranges: ["1m", "5m", "15m", "30m", "60m", "3h", "6h", "12h", "24h", "all"],
   curves: ["util", "mem", "temp", "fan", "power", "clock_gpu", "clock_mem"],
   max_curves: 7,
-  min_interval_ms: 200,
-  max_interval_ms: 10000,
+  min_span_ms: 60_000,
+  max_monitor_span_ms: 86_400_000,
 };
 
 // wave 為平滑的確定函數, 值域約為 0 至 1.
@@ -224,24 +219,26 @@ function value(h: MockHost, gpu: Device, f: Field, t: number): number | null {
   return null;
 }
 
+const step = intervalMS * 1000;
+
 function lastTime(h: MockHost): number {
-  const step = h.interval * 1000;
   return Math.floor((now() - h.lastAgo) / step) * step;
 }
 
-// gapOf 回傳主機的假無資料時段: 主要主機約在顯示範圍的 30% 至 36% 處有一段.
-function gapsOf(h: MockHost, from: number, to: number) {
-  if (h.seed !== 1) {
-    return [];
-  }
-  const span = to - from;
-  const start = from + span * 0.28;
-  const end = from + span * 0.36;
-  return [{ start, end, reason: "error" as const, message: "nvml timeout" }];
+// mainGap 為主要主機的假無資料時段, 起訖為取樣時刻; 開啟預覽頁時約位於 5 分鐘顯示範圍的
+// 28% 至 36% 處, 之後隨時間左移.
+const mainGap: QueryGap = {
+  start: Math.floor((now() - 0.72 * 300e6) / step) * step,
+  end: Math.floor((now() - 0.64 * 300e6) / step) * step,
+  reason: "error",
+  message: "nvml timeout",
+};
+
+function gapsOf(h: MockHost, from: number, to: number): QueryGap[] {
+  return h.seed === 1 && mainGap.end >= from && mainGap.start <= to ? [mainGap] : [];
 }
 
 function sampleTimes(h: MockHost, from: number, to: number): number[] {
-  const step = h.interval * 1000;
   const last = Math.min(to, lastTime(h));
   const gaps = gapsOf(h, from, to);
   const out: number[] = [];
@@ -286,7 +283,7 @@ function makeLive(h: MockHost): Live {
     devices: h.devices,
     has_sample: showsData && !!h.devices,
     time: t,
-    interval_ms: h.interval,
+    interval_ms: intervalMS,
     gpus,
     procs,
   };
@@ -299,21 +296,26 @@ interface QueryGap {
   message?: string;
 }
 
+// query 依 internal/history 的規則產生查詢結果: 取樣筆數不多於 width 時回傳原始取樣點,
+// 否則把 [from, to] 均分為 width 個像素範圍取最大, 最小與平均; stats 為真時另附統計.
 function query(
   h: MockHost,
   from: number,
   to: number,
   width: number,
   fields: Field[],
+  stats = false,
   times: number[] = sampleTimes(h, from, to),
   gaps: QueryGap[] = gapsOf(h, from, to),
 ): QueryResult {
   const gpus = h.devices?.gpus ?? [];
   const binned = times.length > width;
-  const breaks: number[] = [];
+  const between = (a: number, b: number) => gaps.some((g) => a <= g.start && b >= g.end);
+  const last = times.length > 0 ? times[times.length - 1] : 0;
   if (!binned) {
+    const breaks: number[] = [];
     for (let i = 0; i + 1 < times.length; i++) {
-      if (gaps.some((g) => times[i] <= g.start && times[i + 1] >= g.end)) {
+      if (between(times[i], times[i + 1])) {
         breaks.push(i);
       }
     }
@@ -324,38 +326,58 @@ function query(
       }
       return { id: g.id, fields: f };
     });
-    return { from, to, width, binned, samples: times.length, times, breaks, gpus: curves, gaps };
+    return { from, to, width, binned, samples: times.length, last, times, breaks, gpus: curves, gaps };
   }
-  const span = (to - from) / width;
-  const binTimes = Array.from({ length: width }, (_, i) => from + i * span);
-  const bins: number[][] = binTimes.map(() => []);
+  const span = to - from + 1;
+  const binOf = (t: number) => Math.floor(((t - from) * width) / span);
+  const binTimes = Array.from({ length: width }, (_, i) => from + Math.ceil((i * span) / width));
+  const counts = new Array<number>(width).fill(0);
+  const breaks: number[] = [];
+  let prev = -1;
   for (const t of times) {
-    const i = Math.min(width - 1, Math.floor((t - from) / span));
-    bins[i].push(t);
+    const b = binOf(t);
+    counts[b]++;
+    if (prev >= 0 && b === binOf(prev) + 1 && between(prev, t)) {
+      breaks.push(b - 1);
+    }
+    prev = t;
   }
   const curves: GPUCurves[] = gpus.map((g) => {
     const f: Partial<Record<Field, SeriesData>> = {};
     for (const fld of fields) {
-      const avg: (number | null)[] = [];
-      const min: (number | null)[] = [];
-      const max: (number | null)[] = [];
-      for (const b of bins) {
-        const vs = b.map((t) => value(h, g, fld, t)).filter((v): v is number => v !== null);
-        if (vs.length === 0) {
-          avg.push(null);
-          min.push(null);
-          max.push(null);
-        } else {
-          avg.push(vs.reduce((a, c) => a + c, 0) / vs.length);
-          min.push(Math.min(...vs));
-          max.push(Math.max(...vs));
+      const sum = new Array<number>(width).fill(0);
+      const count = new Array<number>(width).fill(0);
+      const min: (number | null)[] = new Array(width).fill(null);
+      const max: (number | null)[] = new Array(width).fill(null);
+      for (const t of times) {
+        const v = value(h, g, fld, t);
+        if (v === null) {
+          continue;
         }
+        const b = binOf(t);
+        min[b] = count[b] === 0 ? v : Math.min(min[b] as number, v);
+        max[b] = count[b] === 0 ? v : Math.max(max[b] as number, v);
+        sum[b] += v;
+        count[b]++;
       }
-      f[fld] = { avg, min, max };
+      const avg = sum.map((x, i) => (count[i] === 0 ? null : x / count[i]));
+      f[fld] = stats ? { avg, min, max, sum, count } : { avg, min, max };
     }
     return { id: g.id, fields: f };
   });
-  return { from, to, width, binned, samples: times.length, times: binTimes, breaks, gpus: curves, gaps };
+  return {
+    from,
+    to,
+    width,
+    binned,
+    samples: times.length,
+    last,
+    counts: stats ? counts : undefined,
+    times: binTimes,
+    breaks,
+    gpus: curves,
+    gaps,
+  };
 }
 
 function find(id: string): MockHost {
@@ -471,7 +493,7 @@ function recordingQuery(r: MockRecording, from: number, to: number, width: numbe
       times.push(t);
     }
   }
-  return query(h, from, to, width, fields, times, r.gaps);
+  return query(h, from, to, width, fields, false, times, r.gaps);
 }
 
 function recordingProcesses(r: MockRecording, t: number): RecordedProcesses | null {
@@ -489,7 +511,7 @@ if (live) {
         emit("monitor:sample", makeLive(h));
       }
     }
-  }, 1000);
+  }, intervalMS);
 }
 
 // mock 供預覽頁觸發事件, 例如輸入要求與錯誤視窗.
@@ -510,7 +532,7 @@ export const backend: Backend = {
     if (hosts.some((h) => h.status.id === id)) {
       throw fail("duplicate", `${id} already exists`);
     }
-    const h: MockHost = { status: status(id, conn.addr, conn.user, "disconnected"), devices: null, interval: 1000, lastAgo: 0, seed: 6 };
+    const h: MockHost = { status: status(id, conn.addr, conn.user, "disconnected"), devices: null, lastAgo: 0, seed: 6 };
     Object.assign(h.status, conn);
     hosts.push(h);
     return { ...h.status };
@@ -551,8 +573,8 @@ export const backend: Backend = {
   async live(id) {
     return makeLive(find(id));
   },
-  async query(id, from, to, width, fields) {
-    return query(find(id), from, to, width, fields);
+  async query(id, from, to, width, fields, stats) {
+    return query(find(id), from, to, width, fields, stats);
   },
   async chooseKeyFile() {
     return "~/.ssh/lab_ed25519";
@@ -595,18 +617,15 @@ export const backend: Backend = {
   },
   async setAppearance() {},
   async setLanguage() {},
-  async setMonitorRange() {},
-  async setHistoryRange() {},
+  async setMonitorSpan(ms) {
+    settings.monitor_span_ms = ms;
+  },
+  async setHistorySpan(ms, all) {
+    settings.history_span_ms = ms;
+    settings.history_all = all;
+  },
   async setCurves() {},
   async setGPUCollapsed() {},
-  async setInterval(ms) {
-    settings.interval_ms = ms;
-    for (const h of hosts) {
-      if (h.status.state === "connected") {
-        h.interval = ms;
-      }
-    }
-  },
   async setProcessesCollapsed(hostID, collapsed) {
     const rest = (settings.collapsed_procs ?? []).filter((id) => id !== hostID);
     settings.collapsed_procs = collapsed ? [...rest, hostID].sort() : rest;

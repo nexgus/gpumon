@@ -109,6 +109,7 @@ export interface GpuRowProps {
   onPin?: (t: number) => void;
   pinHint?: string;
   edge?: ChartEdge;
+  onZoom?: (factor: number, at: number) => void;
 }
 
 // GpuRow 為一張 GPU 的卡片. 頂端的標題列左側為 GPU 名稱, 右側為曲線圖例; 其下左側為
@@ -146,6 +147,7 @@ export const GpuRow = memo(function GpuRow(p: GpuRowProps) {
           onPin={p.onPin}
           pinHint={p.pinHint}
           edge={p.edge}
+          onZoom={p.onZoom}
         />
       </div>
     </section>

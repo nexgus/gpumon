@@ -69,11 +69,14 @@ func (v *Values) UnmarshalJSON(data []byte) error {
 }
 
 // Curve 為單張 GPU 單一欄位的曲線. 降採樣時 Avg, Min, Max 皆有值且長度等於點數;
-// 回傳原始取樣點時只有 Avg, Min 與 Max 為空.
+// 回傳原始取樣點時只有 Avg, Min 與 Max 為空. 查詢條件的 Stats 為真且降採樣時, Sum 與
+// Count 為各像素範圍內該欄位有值的取樣的總和與筆數, Avg 即為 Sum 除以 Count.
 type Curve struct {
-	Avg Values `json:"avg"`
-	Min Values `json:"min,omitempty"`
-	Max Values `json:"max,omitempty"`
+	Avg   Values   `json:"avg"`
+	Min   Values   `json:"min,omitempty"`
+	Max   Values   `json:"max,omitempty"`
+	Sum   Values   `json:"sum,omitempty"`
+	Count []uint32 `json:"count,omitempty"`
 }
 
 // GPUCurves 為單張 GPU 的各欄位曲線, 鍵為欄位名稱.
@@ -113,12 +116,17 @@ type Gap struct {
 //
 // Breaks 的每個元素 i 表示第 i 點與第 i+1 點之間為無資料時段, 曲線須在此斷開;
 // 兩點之間若有留空的點, 曲線本來就會斷開, 不列入 Breaks.
+//
+// Last 為範圍內最後一筆取樣的時刻, Samples 為 0 時為 0. 查詢條件的 Stats 為真且降採樣時,
+// Counts 為各像素範圍內的取樣筆數.
 type Result struct {
 	From    int64       `json:"from"`
 	To      int64       `json:"to"`
 	Width   int         `json:"width"`
 	Binned  bool        `json:"binned"`
 	Samples int         `json:"samples"`
+	Last    int64       `json:"last"`
+	Counts  []uint32    `json:"counts,omitempty"`
 	Times   []int64     `json:"times"`
 	Breaks  []int       `json:"breaks"`
 	GPUs    []GPUCurves `json:"gpus"`

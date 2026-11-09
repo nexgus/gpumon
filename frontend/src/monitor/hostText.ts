@@ -27,11 +27,3 @@ export function statusClass(h: HostStatus): string {
 export function canEdit(h: HostStatus): boolean {
   return h.state === "disconnected";
 }
-
-// formatInterval 把取樣間隔格式化為 "500 ms" 或 "1.0 s".
-export function formatInterval(ms: number, t: Translator): string {
-  if (ms < 1000) {
-    return t("interval.ms", { value: ms });
-  }
-  return t("interval.s", { value: (ms / 1000).toFixed(1) });
-}

@@ -64,16 +64,7 @@ func load(path string) (Data, error) {
 		return Default(), quarantine(path, "corrupt", err)
 	}
 
-	// 舊版設定檔沒有 monitor_range 時, 以 shared_range 的值承接. 舊版的 view_mode
-	// 與各主機的 range 不在 Data 結構內, 讀入時自然忽略.
-	if _, ok := top["monitor_range"]; !ok {
-		var legacy struct {
-			SharedRange TimeRange `json:"shared_range"`
-		}
-		if json.Unmarshal(raw, &legacy) == nil && validMonitorRange(legacy.SharedRange) {
-			d.MonitorRange = legacy.SharedRange
-		}
-	}
+	applyLegacyRanges(&d, top, raw)
 
 	var notice error
 	if d.Version > CurrentVersion {
@@ -82,6 +73,45 @@ func load(path string) (Data, error) {
 	}
 	d.sanitize()
 	return d, notice
+}
+
+// legacyRangeMS 為舊版以選項表示的顯示範圍及其長度, 單位為毫秒. 歷史畫面另有
+// "all", 由 applyLegacyRanges 處理.
+var legacyRangeMS = map[string]int64{
+	"1m": 60_000, "5m": 300_000, "15m": 900_000, "30m": 1_800_000, "60m": 3_600_000,
+	"3h": 10_800_000, "6h": 21_600_000, "12h": 43_200_000, "24h": 86_400_000,
+}
+
+// applyLegacyRanges 以舊版設定檔的顯示範圍承接新版的顯示範圍長度. 監看畫面的長度
+// 依序取 monitor_span_ms, monitor_range, 更早版本的 shared_range; 歷史畫面沒有
+// history_span_ms 而有 history_range 時換算其長度, 其值為 "all" 時處於顯示全部
+// 狀態, 長度維持預設值. 舊版成員不在 Data 結構內, 下次寫入後即不再保留.
+func applyLegacyRanges(d *Data, top map[string]json.RawMessage, raw []byte) {
+	var legacy struct {
+		SharedRange  string `json:"shared_range"`
+		MonitorRange string `json:"monitor_range"`
+		HistoryRange string `json:"history_range"`
+	}
+	// 型別不符的舊版成員視為不存在, 其餘成員照常取用.
+	_ = json.Unmarshal(raw, &legacy)
+	if _, ok := top["monitor_span_ms"]; !ok {
+		src := legacy.MonitorRange
+		if _, has := top["monitor_range"]; !has {
+			src = legacy.SharedRange
+		}
+		if ms, ok := legacyRangeMS[src]; ok {
+			d.MonitorSpanMS = ms
+		}
+	}
+	if _, ok := top["history_span_ms"]; !ok {
+		if legacy.HistoryRange == "all" {
+			if _, has := top["history_all"]; !has {
+				d.HistoryAll = true
+			}
+		} else if ms, ok := legacyRangeMS[legacy.HistoryRange]; ok {
+			d.HistorySpanMS = ms
+		}
+	}
 }
 
 // quarantine 把無法使用的設定檔更名保留, 回傳說明處理結果的錯誤.
@@ -252,21 +282,6 @@ func (s *Store) RemoveHost(id string) error {
 	})
 }
 
-// Interval 回傳所有主機共用的取樣間隔, 單位為毫秒.
-func (s *Store) Interval() int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.data.IntervalMS
-}
-
-// SetInterval 設定所有主機共用的取樣間隔, 單位為毫秒, 範圍 200 至 10000.
-func (s *Store) SetInterval(ms int) error {
-	if ms < MinIntervalMS || ms > MaxIntervalMS {
-		return invalid("interval %d ms out of range %d-%d", ms, MinIntervalMS, MaxIntervalMS)
-	}
-	return s.update(func(d *Data) error { d.IntervalMS = ms; return nil })
-}
-
 // SetWindow 記住主視窗的大小與位置.
 func (s *Store) SetWindow(w Window) error {
 	if w.Width < minWindowSize || w.Width > maxWindowSize ||
@@ -302,20 +317,25 @@ func (s *Store) SetLanguage(v Language) error {
 	return s.update(func(d *Data) error { d.Language = v; return nil })
 }
 
-// SetMonitorRange 設定監看畫面的顯示範圍, 所有主機共用.
-func (s *Store) SetMonitorRange(v TimeRange) error {
-	if !validMonitorRange(v) {
-		return invalid("time range %q", v)
+// SetMonitorSpan 設定監看畫面的顯示範圍長度, 所有主機共用, 單位為毫秒,
+// 範圍 MinSpanMS 至 MaxMonitorSpanMS.
+func (s *Store) SetMonitorSpan(ms int64) error {
+	if ms < MinSpanMS || ms > MaxMonitorSpanMS {
+		return invalid("monitor span %d ms out of range %d-%d", ms, MinSpanMS, MaxMonitorSpanMS)
 	}
-	return s.update(func(d *Data) error { d.MonitorRange = v; return nil })
+	return s.update(func(d *Data) error { d.MonitorSpanMS = ms; return nil })
 }
 
-// SetHistoryRange 設定歷史畫面的顯示範圍, 可為 RangeAll.
-func (s *Store) SetHistoryRange(v TimeRange) error {
-	if !validHistoryRange(v) {
-		return invalid("time range %q", v)
+// SetHistorySpan 設定歷史畫面的顯示範圍長度 (毫秒, 不短於 MinSpanMS) 與是否處於
+// 顯示全部狀態.
+func (s *Store) SetHistorySpan(ms int64, all bool) error {
+	if ms < MinSpanMS {
+		return invalid("history span %d ms shorter than %d", ms, MinSpanMS)
 	}
-	return s.update(func(d *Data) error { d.HistoryRange = v; return nil })
+	return s.update(func(d *Data) error {
+		d.HistorySpanMS, d.HistoryAll = ms, all
+		return nil
+	})
 }
 
 // SetCurves 設定曲線的選擇. 曲線不得重複, 順序依傳入者保留.

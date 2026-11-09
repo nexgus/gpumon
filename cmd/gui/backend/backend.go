@@ -224,9 +224,10 @@ func (s *HostService) LiveAll() []monitor.Live {
 }
 
 // Query 查詢主機於 [from, to] (Unix 微秒) 的曲線資料, width 為曲線圖的像素寬度.
-// 含該主機先前各次連線的記錄與尚未存檔的最新取樣. fields 為空時回傳全部欄位.
-func (s *HostService) Query(ctx context.Context, id string, from, to int64, width int, fields []history.Field) (*history.Result, error) {
-	res, err := s.b.monitor.Query(ctx, id, from, to, width, fields)
+// 含該主機先前各次連線的記錄與尚未存檔的最新取樣. fields 為空時回傳全部欄位. stats 為
+// 真時降採樣的結果另附各像素範圍的統計, 供監看畫面把之後的取樣併入, 見 history.Query.
+func (s *HostService) Query(ctx context.Context, id string, from, to int64, width int, fields []history.Field, stats bool) (*history.Result, error) {
+	res, err := s.b.monitor.Query(ctx, id, history.Query{From: from, To: to, Width: width, Fields: fields, Stats: stats})
 	return res, toErr(err)
 }
 
