@@ -1070,9 +1070,6 @@ func TestHostManagement(t *testing.T) {
 	if err := e.m.RemoveHost(id); CodeOf(err) != CodeBusy {
 		t.Fatalf("remove while connected: %v", err)
 	}
-	if err := e.m.SetRange(id, settings.Range15Min); err != nil {
-		t.Fatalf("range while connected: %v", err)
-	}
 	if n := e.m.ActiveCount(); n != 1 {
 		t.Fatalf("active count %d", n)
 	}
@@ -1090,7 +1087,7 @@ func TestHostManagement(t *testing.T) {
 		t.Fatalf("active count %d", n)
 	}
 	st, err = e.m.UpdateHost(id, settings.HostConn{Addr: "gpu02", User: "alice"})
-	if err != nil || st.ID != "alice@gpu02" || st.Range != settings.Range15Min {
+	if err != nil || st.ID != "alice@gpu02" {
 		t.Fatalf("edit: %+v %v", st, err)
 	}
 	if err := e.m.RemoveHost(st.ID); err != nil {

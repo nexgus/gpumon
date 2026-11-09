@@ -6,7 +6,6 @@ import { ArrowLeftIcon } from "../components/Icons";
 import { formatClock, formatDateTime, parseDateTime, rangeMicros } from "../format";
 import { useT } from "../i18n";
 import { RangeSelect } from "../monitor/controls";
-import { CurvesMenu } from "../monitor/CurvesMenu";
 import {
   choicesStore,
   defaultCurves,
@@ -154,7 +153,6 @@ export function HistoryView() {
           />
         )}
         <RangeSelect value={range} ranges={ranges} onChange={onRange} />
-        <CurvesMenu />
       </div>
       <div className="content">
         {loaded === null && <div className="empty-note">{t("history.loading")}</div>}

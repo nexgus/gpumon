@@ -5,7 +5,6 @@ export type HostState = "disconnected" | "connecting" | "connected" | "reconnect
 
 export type Appearance = "system" | "light" | "dark";
 export type Language = "en" | "zh-TW";
-export type ViewMode = "tabs" | "all";
 export type TimeRange = "1m" | "5m" | "15m" | "30m" | "60m" | "3h" | "6h" | "12h" | "24h" | "all";
 export type Curve = "util" | "mem" | "temp" | "fan" | "power" | "clock_gpu" | "clock_mem";
 export type Field =
@@ -53,7 +52,6 @@ export interface HostStatus extends HostConn {
   id: string;
   name: string;
   interval_ms: number;
-  range: TimeRange;
   state: HostState;
   reason: string;
   retries: number;
@@ -265,8 +263,7 @@ export interface SettingsData {
   window: WindowSettings;
   appearance: Appearance;
   language: Language;
-  view_mode: ViewMode;
-  shared_range: TimeRange;
+  monitor_range: TimeRange;
   history_range: TimeRange;
   curves: Curve[] | null;
   collapsed_gpus: Record<string, number[] | undefined> | null;
@@ -347,7 +344,6 @@ export interface Backend {
   connect(id: string): Promise<void>;
   disconnect(id: string): Promise<void>;
   setInterval(id: string, ms: number): Promise<void>;
-  setRange(id: string, range: TimeRange): Promise<void>;
   answerPrompt(promptID: string, secret: string): Promise<void>;
   cancelPrompt(promptID: string): Promise<void>;
   confirmUpload(noticeID: string): Promise<void>;
@@ -366,8 +362,7 @@ export interface Backend {
   choices(): Promise<Choices>;
   setAppearance(v: Appearance): Promise<void>;
   setLanguage(v: Language): Promise<void>;
-  setViewMode(v: ViewMode): Promise<void>;
-  setSharedRange(v: TimeRange): Promise<void>;
+  setMonitorRange(v: TimeRange): Promise<void>;
   setHistoryRange(v: TimeRange): Promise<void>;
   setCurves(curves: Curve[]): Promise<void>;
   setGPUCollapsed(hostID: string, gpuID: number, collapsed: boolean): Promise<void>;

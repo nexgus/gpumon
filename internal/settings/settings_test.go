@@ -33,8 +33,8 @@ func TestDefaults(t *testing.T) {
 	if d.Appearance != AppearanceSystem || d.Language != LanguageEnglish {
 		t.Errorf("appearance/language = %v/%v", d.Appearance, d.Language)
 	}
-	if d.ViewMode != ViewTabs || d.SharedRange != Range5Min || d.HistoryRange != Range5Min {
-		t.Errorf("view = %v %v %v", d.ViewMode, d.SharedRange, d.HistoryRange)
+	if d.MonitorRange != Range5Min || d.HistoryRange != Range5Min {
+		t.Errorf("ranges = %v %v", d.MonitorRange, d.HistoryRange)
 	}
 	if !reflect.DeepEqual(d.Curves, []Curve{CurveUtil, CurveMem}) {
 		t.Errorf("curves = %v", d.Curves)
@@ -59,12 +59,10 @@ func TestRoundTrip(t *testing.T) {
 	must(s.AddHost(HostConn{Addr: "10.0.0.5", Port: 2222, User: "alice", KeyFile: "~/.ssh/k"}))
 	must(s.AddHost(HostConn{Addr: "gpu02"}))
 	must(s.SetHostInterval("alice@10.0.0.5", 500))
-	must(s.SetHostRange("alice@10.0.0.5", Range3Hours))
 	must(s.SetWindow(Window{Width: 1000, Height: 700, HasPosition: true, X: -50, Y: 20}))
 	must(s.SetAppearance(AppearanceDark))
 	must(s.SetLanguage(LanguageTraditionalChinese))
-	must(s.SetViewMode(ViewAll))
-	must(s.SetSharedRange(Range24Hours))
+	must(s.SetMonitorRange(Range24Hours))
 	must(s.SetHistoryRange(RangeAll))
 	must(s.SetCurves([]Curve{CurveTemp, CurveUtil, CurveClockMem}))
 	must(s.SetGPUCollapsed("alice@10.0.0.5", 1, true))
@@ -84,7 +82,7 @@ func TestRoundTrip(t *testing.T) {
 		t.Errorf("empty collapsed entry should be removed")
 	}
 	h, _ := s2.Host("alice@10.0.0.5")
-	if h.IntervalMS != 500 || h.Range != Range3Hours || h.Port != 2222 || h.KeyFile != "~/.ssh/k" {
+	if h.IntervalMS != 500 || h.Port != 2222 || h.KeyFile != "~/.ssh/k" {
 		t.Errorf("host = %+v", h)
 	}
 	entries, _ := os.ReadDir(dir)
@@ -214,11 +212,11 @@ func TestSetterRanges(t *testing.T) {
 			t.Errorf("interval %d: %v", ms, err)
 		}
 	}
-	if err := s.SetHostRange("u@a", RangeAll); !errors.Is(err, ErrInvalidValue) {
+	if err := s.SetMonitorRange(RangeAll); !errors.Is(err, ErrInvalidValue) {
 		t.Errorf("monitor range must not accept all: %v", err)
 	}
-	if err := s.SetSharedRange("2m"); !errors.Is(err, ErrInvalidValue) {
-		t.Error("bad shared range accepted")
+	if err := s.SetMonitorRange("2m"); !errors.Is(err, ErrInvalidValue) {
+		t.Error("bad monitor range accepted")
 	}
 	if err := s.SetHistoryRange(RangeAll); err != nil {
 		t.Error(err)
@@ -228,9 +226,6 @@ func TestSetterRanges(t *testing.T) {
 	}
 	if err := s.SetLanguage("fr"); err == nil {
 		t.Error("bad language accepted")
-	}
-	if err := s.SetViewMode("x"); err == nil {
-		t.Error("bad view mode accepted")
 	}
 	if err := s.SetCurves([]Curve{CurveUtil, CurveUtil}); err == nil {
 		t.Error("duplicate curve accepted")
@@ -269,12 +264,12 @@ func TestLoadOutOfRangeAndInvalid(t *testing.T) {
 	writeFile(t, dir, `{
 	  "version": 1,
 	  "window": {"width": -3, "height": 99999999, "has_position": true, "x": 5000000, "y": 1},
-	  "appearance": "neon", "language": "xx", "view_mode": "grid",
-	  "shared_range": "all", "history_range": "7m",
+	  "appearance": "neon", "language": "xx",
+	  "monitor_range": "all", "history_range": "7m",
 	  "curves": ["util", "bogus", "util", "power"],
 	  "hosts": [
-	    {"addr": "a", "user": "u", "port": 99999, "interval_ms": 50, "range": "2h"},
-	    {"addr": "b", "user": "u", "interval_ms": 99999, "range": "all"},
+	    {"addr": "a", "user": "u", "port": 99999, "interval_ms": 50},
+	    {"addr": "b", "user": "u", "interval_ms": 99999},
 	    {"addr": "A", "user": "u"},
 	    {"addr": "", "user": "u"},
 	    {"addr": "c d"},
@@ -290,11 +285,11 @@ func TestLoadOutOfRangeAndInvalid(t *testing.T) {
 	if d.Window.HasPosition {
 		t.Errorf("out-of-range position should be dropped: %+v", d.Window)
 	}
-	if d.Appearance != AppearanceSystem || d.Language != LanguageEnglish || d.ViewMode != ViewTabs {
-		t.Errorf("enums not defaulted: %v %v %v", d.Appearance, d.Language, d.ViewMode)
+	if d.Appearance != AppearanceSystem || d.Language != LanguageEnglish {
+		t.Errorf("enums not defaulted: %v %v", d.Appearance, d.Language)
 	}
-	if d.SharedRange != Range5Min || d.HistoryRange != Range5Min {
-		t.Errorf("ranges = %v %v", d.SharedRange, d.HistoryRange)
+	if d.MonitorRange != Range5Min || d.HistoryRange != Range5Min {
+		t.Errorf("ranges = %v %v", d.MonitorRange, d.HistoryRange)
 	}
 	if !reflect.DeepEqual(d.Curves, []Curve{CurveUtil, CurvePower}) {
 		t.Errorf("curves = %v", d.Curves)
@@ -303,10 +298,10 @@ func TestLoadOutOfRangeAndInvalid(t *testing.T) {
 		t.Fatalf("hosts = %+v", d.Hosts)
 	}
 	a, b, e := d.Hosts[0], d.Hosts[1], d.Hosts[2]
-	if a.Port != 0 || a.IntervalMS != 200 || a.Range != Range5Min {
+	if a.Port != 0 || a.IntervalMS != 200 {
 		t.Errorf("a = %+v", a)
 	}
-	if b.IntervalMS != 10000 || b.Range != Range5Min {
+	if b.IntervalMS != 10000 {
 		t.Errorf("b = %+v", b)
 	}
 	if e.ID() != "e" || e.IntervalMS != DefaultIntervalMS {
@@ -320,6 +315,43 @@ func TestLoadOutOfRangeAndInvalid(t *testing.T) {
 	d = mustOpen(t, dir).Snapshot()
 	if d.Window.Width != 200 || d.Window.Height != 200 {
 		t.Errorf("small window should clamp: %+v", d.Window)
+	}
+}
+
+func TestLoadLegacyRanges(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, `{
+	  "version": 1,
+	  "view_mode": "all", "shared_range": "15m",
+	  "hosts": [{"addr": "a", "user": "u", "range": "3h"}]
+	}`)
+	s := mustOpen(t, dir)
+	if d := s.Snapshot(); d.MonitorRange != Range15Min {
+		t.Errorf("shared_range not carried over: %v", d.MonitorRange)
+	}
+	if err := s.SetHistoryRange(Range1Min); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(s.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"view_mode", "shared_range", `"range"`} {
+		if strings.Contains(string(raw), key) {
+			t.Errorf("rewritten file still has %s: %s", key, raw)
+		}
+	}
+	if !strings.Contains(string(raw), `"monitor_range": "15m"`) {
+		t.Errorf("monitor_range missing: %s", raw)
+	}
+
+	writeFile(t, dir, `{"shared_range": "all", "monitor_range": "1h"}`)
+	if d := mustOpen(t, dir).Snapshot(); d.MonitorRange != Range5Min {
+		t.Errorf("invalid monitor_range should default: %v", d.MonitorRange)
+	}
+	writeFile(t, dir, `{"shared_range": "30m", "monitor_range": "6h"}`)
+	if d := mustOpen(t, dir).Snapshot(); d.MonitorRange != Range6Hours {
+		t.Errorf("monitor_range must win: %v", d.MonitorRange)
 	}
 }
 

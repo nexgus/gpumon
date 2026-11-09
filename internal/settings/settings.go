@@ -52,15 +52,6 @@ const (
 	LanguageTraditionalChinese Language = "zh-TW"
 )
 
-// ViewMode 為監看畫面的顯示方式.
-type ViewMode string
-
-// 監看畫面顯示方式的可用值.
-const (
-	ViewTabs ViewMode = "tabs"
-	ViewAll  ViewMode = "all"
-)
-
 // TimeRange 為曲線圖的顯示範圍.
 type TimeRange string
 
@@ -130,10 +121,6 @@ func validLanguage(v Language) bool {
 	return v == LanguageEnglish || v == LanguageTraditionalChinese
 }
 
-func validViewMode(v ViewMode) bool {
-	return v == ViewTabs || v == ViewAll
-}
-
 func validMonitorRange(v TimeRange) bool {
 	for _, r := range MonitorRanges() {
 		if r == v {
@@ -183,8 +170,6 @@ type Host struct {
 	HostConn
 	// IntervalMS 為取樣間隔, 單位為毫秒.
 	IntervalMS int `json:"interval_ms"`
-	// Range 為分頁顯示時此主機的顯示範圍.
-	Range TimeRange `json:"range"`
 }
 
 // ID 回傳主機的識別字串. 使用者名稱非空時為 user@addr; 留空時只有位址,
@@ -209,9 +194,8 @@ type Data struct {
 	Appearance Appearance `json:"appearance"`
 	Language   Language   `json:"language"`
 
-	ViewMode ViewMode `json:"view_mode"`
-	// SharedRange 為同時顯示時所有主機共用的顯示範圍.
-	SharedRange TimeRange `json:"shared_range"`
+	// MonitorRange 為監看畫面的顯示範圍, 所有主機共用.
+	MonitorRange TimeRange `json:"monitor_range"`
 	// HistoryRange 為歷史畫面的顯示範圍.
 	HistoryRange TimeRange `json:"history_range"`
 
@@ -231,8 +215,7 @@ func Default() Data {
 		Window:        Window{Width: DefaultWindowWidth, Height: DefaultWindowHeight},
 		Appearance:    AppearanceSystem,
 		Language:      LanguageEnglish,
-		ViewMode:      ViewTabs,
-		SharedRange:   DefaultRange,
+		MonitorRange:  DefaultRange,
 		HistoryRange:  DefaultRange,
 		Curves:        DefaultCurves(),
 		Hosts:         []Host{},
@@ -284,11 +267,8 @@ func (d *Data) sanitize() {
 	if !validLanguage(d.Language) {
 		d.Language = def.Language
 	}
-	if !validViewMode(d.ViewMode) {
-		d.ViewMode = def.ViewMode
-	}
-	if !validMonitorRange(d.SharedRange) {
-		d.SharedRange = def.SharedRange
+	if !validMonitorRange(d.MonitorRange) {
+		d.MonitorRange = def.MonitorRange
 	}
 	if !validHistoryRange(d.HistoryRange) {
 		d.HistoryRange = def.HistoryRange
@@ -325,9 +305,6 @@ func (d *Data) sanitize() {
 			h.IntervalMS = DefaultIntervalMS
 		}
 		h.IntervalMS = clampInt(h.IntervalMS, MinIntervalMS, MaxIntervalMS)
-		if !validMonitorRange(h.Range) {
-			h.Range = DefaultRange
-		}
 		hosts = append(hosts, h)
 	}
 	d.Hosts = hosts

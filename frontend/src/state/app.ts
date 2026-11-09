@@ -17,7 +17,6 @@ import type {
   SettingsData,
   TimeRange,
   UploadNotice,
-  ViewMode,
 } from "../api/types";
 import { setLanguage as applyLanguage } from "../i18n";
 import { setAppearance as applyAppearance } from "../theme";
@@ -27,12 +26,8 @@ export type Page = "monitor" | "recordings" | "history" | "settings";
 
 export interface UIState {
   page: Page;
-  // selected 為分頁顯示時顯示中的主機, 亦為側欄標示為選取的主機.
+  // selected 為監看畫面顯示中的主機, 亦為側欄標示為選取的主機.
   selected: string | null;
-  // scrollTo 為同時顯示時要捲動至的主機; seq 使重複點選同一台主機時仍會捲動.
-  scrollTo: { id: string; seq: number } | null;
-  // collapsedHosts 為同時顯示時收合的主機區塊, 只記於本次執行期間.
-  collapsedHosts: Record<string, boolean>;
 }
 
 // OperationError 為操作失敗時顯示於錯誤視窗的一筆內容.
@@ -52,7 +47,7 @@ export const hostsStore = new Store<HostStatus[]>([]);
 export const liveStore = new Store<Record<string, Live>>({});
 export const settingsStore = new Store<SettingsData | null>(null);
 export const choicesStore = new Store<Choices | null>(null);
-export const uiStore = new Store<UIState>({ page: "monitor", selected: null, scrollTo: null, collapsedHosts: {} });
+export const uiStore = new Store<UIState>({ page: "monitor", selected: null });
 export const historyStore = new Store<HistoryState>({ paths: [], left: null });
 export const connectErrorsStore = new Store<ConnectError[]>([]);
 export const operationErrorsStore = new Store<OperationError[]>([]);
@@ -223,12 +218,8 @@ async function saveSetting<K extends keyof SettingsData>(
   }
 }
 
-export function setViewMode(v: ViewMode): Promise<void> {
-  return saveSetting("view_mode", v, () => backend.setViewMode(v));
-}
-
-export function setSharedRange(v: TimeRange): Promise<void> {
-  return saveSetting("shared_range", v, () => backend.setSharedRange(v));
+export function setMonitorRange(v: TimeRange): Promise<void> {
+  return saveSetting("monitor_range", v, () => backend.setMonitorRange(v));
 }
 
 export function setHistoryRange(v: TimeRange): Promise<void> {
@@ -328,33 +319,15 @@ export async function setHostInterval(id: string, ms: number): Promise<void> {
   }
 }
 
-export async function setHostRange(id: string, r: TimeRange): Promise<void> {
-  const old = hostsStore.get().find((h) => h.id === id)?.range;
-  patchHost(id, { range: r });
-  try {
-    await backend.setRange(id, r);
-  } catch (err) {
-    if (old) {
-      patchHost(id, { range: old });
-    }
-    reportOperation(hostsStore.get().find((h) => h.id === id)?.name ?? id, err);
-  }
-}
-
 // 以下為畫面的切換.
 
 export function showPage(page: Page): void {
   uiStore.update((u) => ({ ...u, page }));
 }
 
-// selectHost 於主區域顯示監看畫面; 分頁顯示時切換至該主機, 同時顯示時捲動至其區塊.
+// selectHost 於主區域顯示監看畫面並切換至該主機的分頁.
 export function selectHost(id: string): void {
-  uiStore.update((u) => ({
-    ...u,
-    page: "monitor",
-    selected: id,
-    scrollTo: { id, seq: (u.scrollTo?.seq ?? 0) + 1 },
-  }));
+  uiStore.update((u) => ({ ...u, page: "monitor", selected: id }));
 }
 
 // showRecordings 為側欄 "記錄檔" 的行為: 已有開啟中的記錄檔時顯示歷史畫面, 否則顯示
@@ -393,10 +366,6 @@ export function setHistoryLeft(left: number): void {
 // reportOperationFailure 把某項操作失敗的原因顯示於錯誤視窗.
 export function reportOperationFailure(name: string, error: ServiceError): void {
   operationErrorsStore.update((list) => [...list, { name, error }]);
-}
-
-export function setHostCollapsed(id: string, collapsed: boolean): void {
-  uiStore.update((u) => ({ ...u, collapsedHosts: { ...u.collapsedHosts, [id]: collapsed } }));
 }
 
 // confirmUpload 送出上傳通知的確認並關閉該通知視窗.

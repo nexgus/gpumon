@@ -64,6 +64,17 @@ func load(path string) (Data, error) {
 		return Default(), quarantine(path, "corrupt", err)
 	}
 
+	// 舊版設定檔沒有 monitor_range 時, 以 shared_range 的值承接. 舊版的 view_mode
+	// 與各主機的 range 不在 Data 結構內, 讀入時自然忽略.
+	if _, ok := top["monitor_range"]; !ok {
+		var legacy struct {
+			SharedRange TimeRange `json:"shared_range"`
+		}
+		if json.Unmarshal(raw, &legacy) == nil && validMonitorRange(legacy.SharedRange) {
+			d.MonitorRange = legacy.SharedRange
+		}
+	}
+
 	var notice error
 	if d.Version > CurrentVersion {
 		notice = quarantine(path, fmt.Sprintf("v%d", d.Version),
@@ -189,7 +200,7 @@ func (s *Store) AddHost(c HostConn) error {
 		if findDuplicate(d, c, -1) {
 			return fmt.Errorf("%w: %s", ErrDuplicateHost, c.ID())
 		}
-		d.Hosts = append(d.Hosts, Host{HostConn: c, IntervalMS: DefaultIntervalMS, Range: DefaultRange})
+		d.Hosts = append(d.Hosts, Host{HostConn: c, IntervalMS: DefaultIntervalMS})
 		return nil
 	})
 }
@@ -249,21 +260,6 @@ func (s *Store) SetHostInterval(id string, ms int) error {
 	})
 }
 
-// SetHostRange 設定主機於分頁顯示時的顯示範圍.
-func (s *Store) SetHostRange(id string, r TimeRange) error {
-	if !validMonitorRange(r) {
-		return invalid("time range %q", r)
-	}
-	return s.update(func(d *Data) error {
-		i := findHost(d, id)
-		if i < 0 {
-			return fmt.Errorf("%w: %s", ErrHostNotFound, id)
-		}
-		d.Hosts[i].Range = r
-		return nil
-	})
-}
-
 // SetWindow 記住主視窗的大小與位置.
 func (s *Store) SetWindow(w Window) error {
 	if w.Width < minWindowSize || w.Width > maxWindowSize ||
@@ -299,20 +295,12 @@ func (s *Store) SetLanguage(v Language) error {
 	return s.update(func(d *Data) error { d.Language = v; return nil })
 }
 
-// SetViewMode 設定監看畫面的顯示方式.
-func (s *Store) SetViewMode(v ViewMode) error {
-	if !validViewMode(v) {
-		return invalid("view mode %q", v)
-	}
-	return s.update(func(d *Data) error { d.ViewMode = v; return nil })
-}
-
-// SetSharedRange 設定同時顯示時所有主機共用的顯示範圍.
-func (s *Store) SetSharedRange(v TimeRange) error {
+// SetMonitorRange 設定監看畫面的顯示範圍, 所有主機共用.
+func (s *Store) SetMonitorRange(v TimeRange) error {
 	if !validMonitorRange(v) {
 		return invalid("time range %q", v)
 	}
-	return s.update(func(d *Data) error { d.SharedRange = v; return nil })
+	return s.update(func(d *Data) error { d.MonitorRange = v; return nil })
 }
 
 // SetHistoryRange 設定歷史畫面的顯示範圍, 可為 RangeAll.

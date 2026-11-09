@@ -16,8 +16,6 @@
   "action.browse": "Browse",
   "action.editHost": "Edit {name}",
   "action.deleteHost": "Delete {name}",
-  "action.collapseHost": "Collapse {name}",
-  "action.expandHost": "Expand {name}",
 
   "state.connecting": "Connecting",
   "state.connected": "Connected",
@@ -30,9 +28,6 @@
   "page.recordings": "Recordings",
   "page.settings": "Settings",
 
-  "monitor.tabs": "Tabs",
-  "monitor.allHosts": "All hosts",
-  "monitor.viewMode": "View",
   "monitor.hostTabs": "Hosts",
   "monitor.timeRange": "Time range",
   "monitor.interval": "Interval",
@@ -210,6 +205,8 @@
   "settings.appearanceHint": "System follows the appearance of the operating system.",
   "settings.language": "Language",
   "settings.languageHint": "Takes effect immediately.",
+  "settings.timeRangeHint": "Applies to the monitor screen. The history screen has its own time range.",
+  "settings.curvesHint": "Drawn on the monitor and history screens.",
   "appearance.system": "System",
   "appearance.light": "Light",
   "appearance.dark": "Dark",

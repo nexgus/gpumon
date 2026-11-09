@@ -93,7 +93,6 @@ function status(id: string, addr: string, user: string, state: HostStatus["state
     user,
     key_file: "",
     interval_ms: 1000,
-    range: "5m",
     state,
     reason: "",
     retries: 0,
@@ -167,17 +166,11 @@ const settings: SettingsData = {
   window: { width: 1280, height: 800, has_position: false, x: 0, y: 0 },
   appearance: (params.get("theme") as SettingsData["appearance"]) ?? "system",
   language: (params.get("lang") as SettingsData["language"]) ?? "en",
-  view_mode: (params.get("view") as SettingsData["view_mode"]) ?? "tabs",
-  shared_range: (params.get("range") as SettingsData["shared_range"]) ?? "5m",
+  monitor_range: (params.get("range") as SettingsData["monitor_range"]) ?? "5m",
   history_range: (params.get("hrange") as SettingsData["history_range"]) ?? "5m",
   curves: (params.get("curves")?.split(",") as SettingsData["curves"]) ?? ["util", "mem"],
   collapsed_gpus: params.get("collapse") === "1" ? { "sweetener@10.90.20.55": [2] } : {},
 };
-if (params.get("range")) {
-  for (const h of hosts) {
-    h.status.range = settings.shared_range;
-  }
-}
 
 const choices: Choices = {
   monitor_ranges: ["1m", "5m", "15m", "30m", "60m", "3h", "6h", "12h", "24h"],
@@ -552,9 +545,6 @@ export const backend: Backend = {
   async setInterval(id, ms) {
     find(id).status.interval_ms = ms;
   },
-  async setRange(id, r) {
-    find(id).status.range = r;
-  },
   async answerPrompt() {},
   async cancelPrompt() {},
   async confirmUpload() {},
@@ -608,8 +598,7 @@ export const backend: Backend = {
   },
   async setAppearance() {},
   async setLanguage() {},
-  async setViewMode() {},
-  async setSharedRange() {},
+  async setMonitorRange() {},
   async setHistoryRange() {},
   async setCurves() {},
   async setGPUCollapsed() {},

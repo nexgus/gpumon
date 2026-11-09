@@ -129,14 +129,9 @@ func (s *SettingsService) SetLanguage(v settings.Language) error {
 	return nil
 }
 
-// SetViewMode 變更監看畫面的顯示方式.
-func (s *SettingsService) SetViewMode(v settings.ViewMode) error {
-	return toErr(s.b.store.SetViewMode(v))
-}
-
-// SetSharedRange 變更同時顯示時所有主機共用的顯示範圍.
-func (s *SettingsService) SetSharedRange(v settings.TimeRange) error {
-	return toErr(s.b.store.SetSharedRange(v))
+// SetMonitorRange 變更監看畫面的顯示範圍, 所有主機共用.
+func (s *SettingsService) SetMonitorRange(v settings.TimeRange) error {
+	return toErr(s.b.store.SetMonitorRange(v))
 }
 
 // SetHistoryRange 變更歷史畫面的顯示範圍, 可為 "all".

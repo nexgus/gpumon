@@ -372,11 +372,6 @@ func (m *Manager) SetInterval(id string, ms int) error {
 	return nil
 }
 
-// SetRange 設定主機於分頁顯示時的顯示範圍. 純本機設定, 不通知遠端.
-func (m *Manager) SetRange(id string, r settings.TimeRange) error {
-	return settingsErr(m.store.SetHostRange(id, r))
-}
-
 // Live 回傳主機的 devices 資訊, 最新一筆取樣與程序列表.
 func (m *Manager) Live(id string) (Live, error) {
 	if _, ok := m.store.Host(id); !ok {

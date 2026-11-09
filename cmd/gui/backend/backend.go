@@ -196,11 +196,6 @@ func (s *HostService) SetInterval(id string, ms int) error {
 	return toErr(s.b.monitor.SetInterval(id, ms))
 }
 
-// SetRange 設定主機於分頁顯示時的顯示範圍.
-func (s *HostService) SetRange(id string, r settings.TimeRange) error {
-	return toErr(s.b.monitor.SetRange(id, r))
-}
-
 // AnswerPrompt 回覆登入密碼或金鑰密碼的輸入要求. 收到後立即轉為位元組陣列, 不另存字串.
 func (s *HostService) AnswerPrompt(promptID string, secret string) error {
 	return toErr(s.b.monitor.AnswerPrompt(promptID, []byte(secret)))

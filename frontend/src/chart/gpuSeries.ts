@@ -45,7 +45,7 @@ export function gapDetail(g: Gap, t: Translator): string {
 }
 
 // toChartData 取出查詢結果中與 GPU 無關的部分. extraGaps 為呼叫端另行標示的無資料
-// 時段, 例如重新連線中的主機於最後一筆取樣之後的時段.
+// 時段, 例如歷史畫面中記錄範圍以外的時段.
 export function toChartData(res: QueryResult, t: Translator, extraGaps: ChartGap[] = []): ChartData {
   return {
     binned: res.binned,
