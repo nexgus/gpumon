@@ -6,10 +6,6 @@ gpumon is a desktop GUI application for Windows and macOS that monitors the GPUs
 
 These are design mockups, not screenshots of the running program.
 
-## Status
-
-The project is in the specification and design stage. The repository contains the specification and the design mockups. No runnable program is available yet.
-
 ## Features
 
 - **No root required.** A regular user account with SSH access is enough.
@@ -32,6 +28,11 @@ Remote host:
 - Linux x86_64 with glibc. Distributions that use musl, such as Alpine Linux, are not supported.
 - SSH login with a regular user account.
 - A home directory that is writable and executable. The remote program is placed in `~/.gpumon/`.
+
+## Tested GPUs
+
+- NVIDIA RTX PRO 6000 Blackwell Workstation Edition
+- Intel UHD Graphics 770 (Raptor Lake-S GT1)
 
 ## License
 

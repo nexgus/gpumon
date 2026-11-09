@@ -1,0 +1,76 @@
+// 以 Wails 產生的 bindings 實作 Backend 介面. 前端只經由本檔案呼叫後端; 預覽頁的
+// Vite 設定 (vite.preview.config.ts) 把本檔案換成以假資料實作的版本.
+import { Browser, Clipboard, Events } from "@wailsio/runtime";
+import { AppService, HostService, RecordingService, SettingsService } from "../../bindings/gpumon/cmd/gui/backend";
+import type { Backend, BackendEvents } from "./types";
+
+// 以 any 轉接 bindings 的列舉與類別型別; 兩者的 JSON 結構與 api/types.ts 相同.
+const host = HostService as any;
+const settings = SettingsService as any;
+const recording = RecordingService as any;
+const app = AppService as any;
+
+export const backend: Backend = {
+  hosts: () => host.Hosts(),
+  addHost: (conn) => host.AddHost(conn),
+  updateHost: (id, conn) => host.UpdateHost(id, conn),
+  removeHost: (id) => host.RemoveHost(id),
+  connect: (id) => host.Connect(id),
+  disconnect: (id) => host.Disconnect(id),
+  setInterval: (id, ms) => host.SetInterval(id, ms),
+  setRange: (id, r) => host.SetRange(id, r),
+  answerPrompt: (id, secret) => host.AnswerPrompt(id, secret),
+  cancelPrompt: (id) => host.CancelPrompt(id),
+  confirmUpload: (id) => host.ConfirmUpload(id),
+  liveAll: async () => (await host.LiveAll()) ?? [],
+  live: (id) => host.Live(id),
+  query: (id, from, to, width, fields) => host.Query(id, from, to, width, fields),
+  chooseKeyFile: (title) => host.ChooseKeyFile(title),
+
+  recordings: async () => {
+    const l = await recording.List();
+    return { hosts: l?.hosts ?? [], skipped: l?.skipped ?? [] };
+  },
+  deleteRecordings: async (paths) => (await recording.Delete(paths)) ?? [],
+  recordingInfo: (path) => recording.Info(path),
+  queryRecording: (path, from, to, width, fields) => recording.Query([path], from, to, width, fields),
+  processesAt: async (path, t) => {
+    const p = await recording.ProcessesAt(path, t);
+    if (!p) {
+      return null;
+    }
+    // 記錄內的程序以 omitempty 存放, 缺少的成員補上預設值.
+    const procs = ((p.procs ?? []) as any[]).map((x) => ({
+      gpu: x.gpu ?? 0,
+      pid: x.pid ?? 0,
+      user: x.user ?? "",
+      mem: x.mem ?? null,
+      util: x.util ?? null,
+      cmd: x.cmd ?? "",
+    }));
+    return { time: p.time, procs };
+  },
+
+  getSettings: () => settings.Get(),
+  choices: () => settings.Choices(),
+  setAppearance: (v) => settings.SetAppearance(v),
+  setLanguage: (v) => settings.SetLanguage(v),
+  setViewMode: (v) => settings.SetViewMode(v),
+  setSharedRange: (v) => settings.SetSharedRange(v),
+  setHistoryRange: (v) => settings.SetHistoryRange(v),
+  setCurves: (curves) => settings.SetCurves(curves),
+  setGPUCollapsed: (hostID, gpuID, collapsed) => settings.SetGPUCollapsed(hostID, gpuID, collapsed),
+
+  about: () => app.About(),
+  confirmQuit: () => app.ConfirmQuit(),
+  copyText: async (text) => {
+    await Clipboard.SetText(text);
+  },
+  openURL: async (url) => {
+    await Browser.OpenURL(url);
+  },
+
+  on<K extends keyof BackendEvents>(name: K, cb: (data: BackendEvents[K]) => void) {
+    return Events.On(name, (ev: any) => cb(ev.data as BackendEvents[K]));
+  },
+};

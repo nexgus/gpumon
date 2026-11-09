@@ -2,7 +2,14 @@ module gpumon
 
 go 1.26.0
 
-require github.com/wailsapp/wails/v3 v3.1.0
+require (
+	github.com/Microsoft/go-winio v0.6.2
+	github.com/ebitengine/purego v0.11.1
+	github.com/pkg/sftp v1.13.11
+	github.com/skeema/knownhosts v1.3.2
+	github.com/wailsapp/wails/v3 v3.1.0
+	golang.org/x/crypto v0.57.0
+)
 
 require (
 	al.essio.dev/pkg/shellescape v1.5.1 // indirect
@@ -16,7 +23,6 @@ require (
 	github.com/Masterminds/goutils v1.1.1 // indirect
 	github.com/Masterminds/semver/v3 v3.4.0 // indirect
 	github.com/Masterminds/sprig/v3 v3.3.0 // indirect
-	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/ProtonMail/go-crypto v1.3.0 // indirect
 	github.com/alecthomas/chroma/v2 v2.23.1 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
@@ -50,7 +56,6 @@ require (
 	github.com/dlclark/regexp2 v1.11.5 // indirect
 	github.com/dominikbraun/graph v0.23.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/ebitengine/purego v0.11.1 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/fatih/color v1.18.0 // indirect
@@ -80,6 +85,7 @@ require (
 	github.com/klauspost/compress v1.18.7 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/klauspost/pgzip v1.2.6 // indirect
+	github.com/kr/fs v0.1.0 // indirect
 	github.com/leaanthony/clir v1.7.0 // indirect
 	github.com/leaanthony/dmg v0.0.0-20260731074841-5c28840cf819 // indirect
 	github.com/lithammer/fuzzysearch v1.1.8 // indirect
@@ -110,7 +116,6 @@ require (
 	github.com/segmentio/encoding v0.5.4 // indirect
 	github.com/sergi/go-diff v1.4.0 // indirect
 	github.com/shopspring/decimal v1.4.0 // indirect
-	github.com/skeema/knownhosts v1.3.2 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/tc-hib/winres v0.3.1 // indirect
@@ -125,7 +130,6 @@ require (
 	github.com/zeebo/xxh3 v1.1.0 // indirect
 	gitlab.com/digitalxero/go-conventional-commit v1.0.7 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
-	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/image v0.45.0 // indirect
 	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/net v0.60.0 // indirect

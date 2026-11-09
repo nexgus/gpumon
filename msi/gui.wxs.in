@@ -13,6 +13,9 @@
   安裝範圍為 perUser, 不需管理員權限, 安裝目錄為
   %LOCALAPPDATA%\Programs\Augustus Chen\GPU Monitor\. 開始功能表與桌面捷徑
   無條件安裝, 因 wixl 不支援 <UI> 元素, 無法在安裝過程詢問使用者.
+
+  圖示檔路徑相對於 build.sh 執行 wixl 時的工作目錄 (專案根目錄). ARPPRODUCTICON
+  指定 "新增或移除程式" 顯示的圖示.
 -->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Product Id="*"
@@ -37,6 +40,9 @@
       產品一併移除. a 強制重寫所有檔案以避免此問題.
     -->
     <Property Id="REINSTALLMODE" Value="amus" />
+
+    <Icon Id="gpumon.ico" SourceFile="assets/icon/gpumon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="gpumon.ico" />
 
     <Media Id="1" Cabinet="gpumon.cab" EmbedCab="yes" />
 

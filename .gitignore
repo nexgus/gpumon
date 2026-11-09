@@ -9,6 +9,9 @@ CLAUDE.md
 # build.sh 由 msi/gui.wxs.in 產生的中間檔.
 /msi/gui.wxs
 
+# build.sh 由 assets/icon/gpumon.ico 產生的 Windows 圖示資源.
+/cmd/gui/rsrc_windows_amd64.syso
+
 # 前端的相依套件, 打包產出與每次建置重新產生的 bindings.
 /frontend/node_modules/
 /frontend/dist/

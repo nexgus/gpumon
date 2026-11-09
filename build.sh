@@ -18,6 +18,7 @@
 #   gpumon-<完整版本>-darwin-arm64.app    (--all)
 #   gpumon-<完整版本>-darwin-arm64.pkg    (--all)
 #   gpumon-<完整版本>-windows-amd64.msi   (--all)
+#   gpumon                                指向本次 darwin 執行檔的符號連結
 # 建置前先將 bin/ 內的舊產出依版本段歸檔至 bin/archive/<版本>/.
 
 # 取得本檔路徑並判斷是否被 source. bash 與 zsh 取法不同, zsh 的語法以 eval 包住,
@@ -181,12 +182,17 @@ function build_frontend {
     (cd frontend && GPUMON_NPM_PACKAGES="$1" npm run build)
 }
 
-# build_app 組出 .app bundle, 不含圖示.
+# build_app 組出 .app bundle. 圖示有兩份, CFBundleIconName 指向 assets/icon/Assets.car
+# (含深色外觀), CFBundleIconFile 指向 assets/icon/gpumon.icns, 兩個鍵與 actool 產生的
+# Info.plist 片段相同.
 function build_app {
     local app="$OUT_DIR/$APP_OUT"
     rm -rf "$app"
     mkdir -p "$app/Contents/MacOS"
+    mkdir -p "$app/Contents/Resources"
     cp "$OUT_DIR/$MAC_OUT" "$app/Contents/MacOS/gpumon"
+    cp assets/icon/gpumon.icns "$app/Contents/Resources/gpumon.icns"
+    cp assets/icon/Assets.car "$app/Contents/Resources/Assets.car"
     cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -199,6 +205,10 @@ function build_app {
 	<key>CFBundleDisplayName</key>
 	<string>${APP_NAME}</string>
 	<key>CFBundleExecutable</key>
+	<string>gpumon</string>
+	<key>CFBundleIconFile</key>
+	<string>gpumon</string>
+	<key>CFBundleIconName</key>
 	<string>gpumon</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
@@ -254,6 +264,7 @@ fi
 ensure_npm_deps
 go mod download
 go -C scripts/licgen mod download
+go -C scripts/syso mod download
 
 echo "=== Building gpumon ${FULLVER} ==="
 mkdir -p "$OUT_DIR"
@@ -291,6 +302,15 @@ GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 \
     go build -trimpath -tags production \
     -ldflags "-s -w -extldflags '-mmacosx-version-min=${MACOS_MIN}' ${VERLD}" \
     -o "$OUT_DIR/$MAC_OUT" ./cmd/gui
+# 以相對路徑建立指向本次 macOS 執行檔的符號連結, 供直接以 bin/gpumon 執行最新的
+# 建置; 既有的連結由新的連結取代.
+ln -sfn "$MAC_OUT" "$OUT_DIR/gpumon"
+
+# 由 assets/icon/gpumon.ico 產生只含圖示資源的 .syso, 檔名帶 windows_amd64 使 Go
+# 只在該平台連結. 所需的 module 皆已在本機, 以 GOPROXY=off 確保不連網.
+echo "Generating Windows icon resource..."
+GOPROXY=off go -C scripts/syso run . -ico "$ROOT_DIR/assets/icon/gpumon.ico" \
+    -out "$ROOT_DIR/cmd/gui/rsrc_windows_amd64.syso"
 
 echo "Building GUI (windows/amd64)..."
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -tags production \
@@ -311,6 +331,7 @@ echo "Built artifacts (${OUT_DIR}/):"
 for f in "$CLI_OUT" "$MAC_OUT" "$WIN_OUT"; do
     echo "  $f"
 done
+echo "  gpumon -> $MAC_OUT"
 if [ "$BUILD_ALL" = 1 ]; then
     for f in "$APP_OUT" "$PKG_OUT" "$MSI_OUT"; do
         echo "  $f"

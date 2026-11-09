@@ -15,5 +15,5 @@
     "noFallthroughCasesInSwitch": true,
     "types": ["node"]
   },
-  "include": ["src", "bindings", "vite.config.ts"]
+  "include": ["src", "bindings", "vite.config.ts", "vite.preview.config.ts"]
 }

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  tray.svg 中兩隻眼睛的遮罩, 座標與 tray.svg 的鏤空完全相同.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 64 64"><rect width="64" height="64" fill="#000"/><g fill="#fff"><path d="M22,25 Q28.5,24.2 30.8,31.8 Q23.8,33.2 22,25 Z" transform="translate(24.4 15.5) scale(1.45) translate(-26.4 -28.6)"/><path d="M42,25 Q35.5,24.2 33.2,31.8 Q40.2,33.2 42,25 Z" transform="translate(39.6 15.5) scale(1.45) translate(-37.6 -28.6)"/></g></svg>

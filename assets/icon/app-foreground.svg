@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  macOS 26 新格式圖示 (gpumon.icon) 的前景圖層母版, 僅有白色章魚, 背景透明, 眼睛鏤空.
+  範圍裁成 app.svg 中方磚的大小, 章魚的位置與比例與 app.svg 相同; 修改 app.svg 的章魚
+  時須同步修改本檔. 背景色由 gpumon.icon 的填色設定, 不在本檔中.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="6.25 6.25 51.5 51.5">
+  <defs><mask id="m" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64">
+    <rect width="64" height="64" fill="#000"/>
+    <g transform="translate(32 32.5) scale(0.74) translate(-32 -31)">
+      <g fill="#fff"><ellipse cx="32" cy="12.5" rx="12.5" ry="10.5"/><ellipse cx="32" cy="21.5" rx="9.5" ry="4"/><ellipse cx="32" cy="28.5" rx="12.5" ry="8.8"/></g>
+      <g fill="none" stroke="#fff" stroke-width="4.6" stroke-linecap="round">
+        <path d="M21,30.5 C17,26.5 11,25 7.5,27.5 C4,30 4,34.5 7,35.5 C9,36 10.5,34.5 10,33"/>
+        <path d="M23.5,35 C19,38.5 13.5,40 11,43.5 C8.5,47 9.5,51.5 13,51.5 C15,51.5 16,49.5 14.5,48"/>
+        <path d="M27.5,36 C27,41 24,45 22.5,49 C21,53 21.5,57.5 25,58 C27,58.2 28,56 26.5,54.8"/>
+        <g transform="translate(64 0) scale(-1 1)">
+          <path d="M21,30.5 C17,26.5 11,25 7.5,27.5 C4,30 4,34.5 7,35.5 C9,36 10.5,34.5 10,33"/>
+          <path d="M23.5,35 C19,38.5 13.5,40 11,43.5 C8.5,47 9.5,51.5 13,51.5 C15,51.5 16,49.5 14.5,48"/>
+          <path d="M27.5,36 C27,41 24,45 22.5,49 C21,53 21.5,57.5 25,58 C27,58.2 28,56 26.5,54.8"/>
+        </g>
+      </g>
+      <g fill="#000"><path d="M22,25 Q28.5,24.2 30.8,31.8 Q23.8,33.2 22,25 Z"/><path d="M42,25 Q35.5,24.2 33.2,31.8 Q40.2,33.2 42,25 Z"/></g>
+    </g>
+  </mask></defs>
+  <rect width="64" height="64" fill="#fff" mask="url(#m)"/>
+</svg>
