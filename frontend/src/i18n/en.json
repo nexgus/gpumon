@@ -181,9 +181,6 @@
 
   "history.title": "History",
   "history.back": "Recordings",
-  "history.goTo": "Go to",
-  "history.go": "Go",
-  "history.goInvalid": "Enter a date and time as YYYY-MM-DD HH:MM:SS.",
   "history.showAll": "Show All",
   "history.pinned": "Pinned {time}",
   "history.clearPin": "Clear pinned time",

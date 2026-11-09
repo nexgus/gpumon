@@ -10,8 +10,7 @@
 //   page=recordings|history|settings (顯示該畫面), hspan=<歷史畫面的顯示範圍長度, 毫秒>, hall=1 (歷史畫面
 //   處於顯示全部狀態),
 //   select=all|<記錄檔清單由上而下的列號, 以逗號分隔, 自 0 起> (勾選), openrec=1 (按 Open,
-//   顯示歷史畫面), confirmdelete=1 (按 Delete, 顯示確認視窗), goto=<YYYY-MM-DD HH:MM:SS>
-//   (歷史畫面跳至該時刻), dialog=quit (結束確認視窗, count=<主機數>, 預設 2),
+//   顯示歷史畫面), confirmdelete=1 (按 Delete, 顯示確認視窗), dialog=quit (結束確認視窗, count=<主機數>, 預設 2),
 //   window=about (關於視窗, 以 600 x 600 的視窗檢視; tab=about|licenses,
 //   platform=windows 顯示 Windows 的資訊, jump=<n> 點選第三方授權分頁表中第 n 個授權種類).
 import { StrictMode } from "react";
@@ -183,13 +182,6 @@ function scenario(): void {
         }
         if (page === "history" || params.get("openrec") === "1") {
           click(".toolbar .btn-primary");
-        }
-        const goto = params.get("goto");
-        if (goto) {
-          later(() => {
-            setInput(".jump-input", goto);
-            click('.toolbar form button[type="submit"]');
-          }, 500);
         }
       }, 100);
     }, 300);

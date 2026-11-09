@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { backend } from "../api/backend";
 import { serviceError } from "../api/errors";
 import type { RecordingInfo } from "../api/types";
 import type { ChartEdge } from "../chart/Chart";
 import { ArrowLeftIcon } from "../components/Icons";
-import { formatClock, formatDateTime, parseDateTime } from "../format";
+import { formatClock, formatDateTime } from "../format";
 import { useT } from "../i18n";
 import { ZoomControls } from "../monitor/controls";
 import {
@@ -63,54 +63,6 @@ function useInfos(paths: string[]): Loaded[] | null {
 
 function baseName(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
-}
-
-function JumpForm({ onJump, initial }: { onJump: (us: number) => void; initial: string }) {
-  const t = useT();
-  const id = useId();
-  const [text, setText] = useState(initial);
-  const [invalid, setInvalid] = useState(false);
-  const submit = () => {
-    const us = parseDateTime(text);
-    setInvalid(us === null);
-    if (us !== null) {
-      onJump(us);
-    }
-  };
-  return (
-    <form
-      className="ctl"
-      onSubmit={(e) => {
-        e.preventDefault();
-        submit();
-      }}
-    >
-      <label htmlFor={id} className="ctl-label">
-        {t("history.goTo")}
-      </label>
-      <input
-        id={id}
-        type="text"
-        className="input jump-input"
-        value={text}
-        aria-invalid={invalid}
-        title={invalid ? t("history.goInvalid") : undefined}
-        spellCheck={false}
-        onChange={(e) => {
-          setText(e.target.value);
-          setInvalid(false);
-        }}
-      />
-      <button type="submit" className="btn">
-        {t("history.go")}
-      </button>
-      {invalid && (
-        <span className="jump-error" role="alert">
-          {t("history.goInvalid")}
-        </span>
-      )}
-    </form>
-  );
 }
 
 // HistoryView 為歷史畫面: 頂端為工具列, 其下為每個記錄檔一個的分組. 時間捲動由曲線圖
@@ -331,15 +283,6 @@ export function HistoryView() {
         <span className="flex1" />
         {infos.length > 0 && (
           <>
-            <JumpForm
-              key={paths.join("\n")}
-              initial={formatDateTime(Math.round((left + span / 2) / 1e6) * 1e6)}
-              onJump={(us) => {
-                stopFling();
-                setHistoryLeft(us - span / 2);
-                setHistoryPinned(Math.min(max, Math.max(min, us)));
-              }}
-            />
             <ZoomControls span={span} min={minLen} max={total} outDisabled={all} onZoom={onButtonZoom} />
             <button type="button" className="btn" aria-pressed={all} onClick={showAll}>
               {t("history.showAll")}

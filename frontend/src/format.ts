@@ -74,25 +74,3 @@ export function formatDateRange(start: number, end: number): string {
   const b = formatDateTime(end);
   return `${a} - ${a.slice(0, 10) === b.slice(0, 10) ? b.slice(11) : b}`;
 }
-
-// parseDateTime 解析 YYYY-MM-DD HH:MM[:SS] (本機時區) 為 Unix 微秒; 格式不符或日期不
-// 存在 (例如 2 月 30 日) 時回傳 null.
-export function parseDateTime(text: string): number | null {
-  const m = /^\s*(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?\s*$/.exec(text);
-  if (!m) {
-    return null;
-  }
-  const [y, mo, d, h, mi, sec] = [m[1], m[2], m[3], m[4], m[5], m[6] ?? "0"].map(Number);
-  const date = new Date(y, mo - 1, d, h, mi, sec);
-  if (
-    date.getFullYear() !== y ||
-    date.getMonth() !== mo - 1 ||
-    date.getDate() !== d ||
-    date.getHours() !== h ||
-    date.getMinutes() !== mi ||
-    date.getSeconds() !== sec
-  ) {
-    return null;
-  }
-  return date.getTime() * 1000;
-}
