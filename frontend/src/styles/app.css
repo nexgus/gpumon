@@ -580,9 +580,18 @@ button:disabled {
 .chart-plot {
   position: relative;
   min-width: 0;
+  user-select: none;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--surface);
+}
+
+.chart-plot.pannable {
+  cursor: grab;
+}
+
+.chart-plot.panning {
+  cursor: grabbing;
 }
 
 .chart-plot canvas {

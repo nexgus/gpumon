@@ -24,6 +24,9 @@ const historyRanges: TimeRange[] = ["1m", "5m", "15m", "30m", "60m", "3h", "6h",
 const minSpan = 1e6;
 // 邊緣自動捲動每秒移動顯示範圍長度的比例.
 const edgeSpeed = 0.1;
+// 慣性捲動速度的指數衰減時間常數 (秒), 與速度低於此值 (像素/秒) 即停止.
+const flingTau = 0.2;
+const flingStopSpeed = 20;
 
 type Loaded = { path: string; info: RecordingInfo } | { path: string; error: string };
 
@@ -141,6 +144,26 @@ export function HistoryView() {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [pinned !== null]);
 
+  const flingId = useRef<number | null>(null);
+  const [flinging, setFlinging] = useState(false);
+  // 停止慣性捲動, 回傳先前是否正在滑動.
+  const stopFling = useCallback((): boolean => {
+    if (flingId.current === null) {
+      return false;
+    }
+    cancelAnimationFrame(flingId.current);
+    flingId.current = null;
+    setFlinging(false);
+    return true;
+  }, []);
+  useEffect(() => {
+    window.addEventListener("blur", stopFling);
+    return () => {
+      window.removeEventListener("blur", stopFling);
+      stopFling();
+    };
+  }, [stopFling]);
+
   const infos = useMemo(() => (loaded ?? []).flatMap((l) => ("info" in l ? [l.info] : [])), [loaded]);
   const min = infos.length > 0 ? Math.min(...infos.map((i) => i.start)) : 0;
   const max = infos.length > 0 ? Math.max(...infos.map((i) => i.end)) : 0;
@@ -151,6 +174,7 @@ export function HistoryView() {
   const to = left + span;
 
   const onRange = (r: TimeRange) => {
+    stopFling();
     // 變更顯示範圍時維持目前畫面的中心.
     const next = r === "all" ? total : rangeMicros(r);
     setHistoryLeft(left + span / 2 - next / 2);
@@ -174,7 +198,8 @@ export function HistoryView() {
   }, []);
 
   const [edgeDir, setEdgeDir] = useState(0);
-  const dir = scrollable ? edgeDir : 0;
+  const [held, setHeld] = useState(false);
+  const dir = scrollable && !held && !flinging ? edgeDir : 0;
   useEffect(() => {
     if (dir === 0) {
       return;
@@ -192,16 +217,61 @@ export function HistoryView() {
     return () => cancelAnimationFrame(id);
   }, [dir, moveBy]);
 
-  const onPan = useCallback((frac: number) => void moveBy(frac * view.current.span), [moveBy]);
+  const onPan = useCallback(
+    (frac: number) => {
+      stopFling();
+      void moveBy(frac * view.current.span);
+    },
+    [moveBy, stopFling],
+  );
+  const onDrag = useCallback(
+    (next: number) => {
+      stopFling();
+      void moveBy(next - view.current.left);
+    },
+    [moveBy, stopFling],
+  );
+  const onFling = useCallback(
+    (vx: number, width: number) => {
+      stopFling();
+      const w = Math.max(1, width);
+      // v 為顯示範圍長度的倍數/秒, 曲線跟著手移動, 故與手的方向相反.
+      let v = -vx / w;
+      const minV = flingStopSpeed / w;
+      let last = performance.now();
+      const step = (now: number) => {
+        const dt = Math.min(0.25, (now - last) / 1000);
+        last = now;
+        const decay = Math.exp(-dt / flingTau);
+        const moved = moveBy(v * view.current.span * flingTau * (1 - decay));
+        v *= decay;
+        if (!moved || Math.abs(v) < minV) {
+          flingId.current = null;
+          setFlinging(false);
+          return;
+        }
+        flingId.current = requestAnimationFrame(step);
+      };
+      flingId.current = requestAnimationFrame(step);
+      setFlinging(true);
+    },
+    [moveBy, stopFling],
+  );
   const edge = useMemo(
     (): ChartEdge => ({
       canLeft: scrollable && left > min,
       canRight: scrollable && left < maxLeft,
       active: dir,
+      scrollable,
+      flinging,
       onEdge: setEdgeDir,
       onPan,
+      onHold: setHeld,
+      onStop: stopFling,
+      onDrag,
+      onFling,
     }),
-    [scrollable, left, min, maxLeft, dir, onPan],
+    [scrollable, flinging, left, min, maxLeft, dir, onPan, stopFling, onDrag, onFling],
   );
 
   const sameDay = formatDateTime(min).slice(0, 10) === formatDateTime(max).slice(0, 10);
@@ -235,6 +305,7 @@ export function HistoryView() {
             key={paths.join("\n")}
             initial={formatDateTime(Math.round((left + span / 2) / 1e6) * 1e6)}
             onJump={(us) => {
+              stopFling();
               setHistoryLeft(us - span / 2);
               setHistoryPinned(Math.min(max, Math.max(min, us)));
             }}

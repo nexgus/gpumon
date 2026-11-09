@@ -67,17 +67,42 @@ export interface ChartProps {
 // active 為正在自動捲動的方向 (-1 往較早, 1 往較晚, 0 為未捲動). onEdge 於游標在邊緣區
 // 停留夠久時回報方向, 離開邊緣區時回報 0. onPan 回報橫向滾動的位移, 單位為繪圖區寬度
 // 的倍數, 正值往較晚的時間.
+// scrollable 表示捲動範圍長於顯示範圍, 才能按住拖曳平移. flinging 表示慣性捲動進行中.
+// onHold 回報按住滑鼠 (平移中或尚未超過門檻) 的開始與結束. onStop 停止慣性捲動, 回傳
+// 先前是否正在滑動. onDrag 將顯示範圍左緣設為指定時刻 (Unix 微秒, 超出範圍時限制於
+// 捲動範圍內). onFling 於平移放開時回報起始速度 (手的水平速度, 像素/秒) 與繪圖區寬度.
 export interface ChartEdge {
   canLeft: boolean;
   canRight: boolean;
   active: number;
+  scrollable: boolean;
+  flinging: boolean;
   onEdge: (dir: number) => void;
   onPan: (frac: number) => void;
+  onHold: (held: boolean) => void;
+  onStop: () => boolean;
+  onDrag: (left: number) => void;
+  onFling: (vx: number, width: number) => void;
 }
 
 const TICKS = 6;
 const EDGE_ZONE = 24;
 const EDGE_DWELL_MS = 300;
+// 按下後移動超過此距離 (像素) 才視為拖曳.
+const DRAG_THRESHOLD = 4;
+// 放開前取樣速度的時間窗 (毫秒), 與低於此速度 (像素/秒) 不滑動的門檻.
+const VELOCITY_WINDOW_MS = 100;
+const FLING_MIN_SPEED = 300;
+
+interface Gesture {
+  x0: number;
+  y0: number;
+  from0: number;
+  span0: number;
+  pannable: boolean;
+  panning: boolean;
+  samples: { t: number; x: number }[];
+}
 
 function cssVar(el: Element, name: string): string {
   return getComputedStyle(el).getPropertyValue(name).trim();
@@ -295,6 +320,16 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHov
   const zone = useRef(0);
   const reported = useRef(false);
   const dwell = useRef<number | undefined>(undefined);
+  const fromRef = useRef(from);
+  fromRef.current = from;
+  const toRef = useRef(to);
+  toRef.current = to;
+  const gesture = useRef<Gesture | null>(null);
+  const skipClick = useRef(false);
+  const [held, setHeld] = useState(false);
+  const [panning, setPanning] = useState(false);
+  const flinging = edge?.flinging ?? false;
+  const busy = panning || flinging;
 
   // 清除邊緣區的停留計時, 並在已回報捲動時回報停止.
   const resetZone = useCallback(() => {
@@ -307,14 +342,50 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHov
     }
   }, []);
 
-  // 卸載與視窗失去焦點時停止邊緣捲動.
+  // 結束按住的手勢. fling 為真時依放開前的速度啟動慣性捲動, 取消, 失去焦點與失去
+  // pointer capture 時不滑動.
+  const finishGesture = useCallback((el: HTMLElement | null, pointerId: number | null, fling: boolean) => {
+    const g = gesture.current;
+    gesture.current = null;
+    if (!g || !g.pannable) {
+      return;
+    }
+    if (el && pointerId !== null && el.hasPointerCapture(pointerId)) {
+      el.releasePointerCapture(pointerId);
+    }
+    setHeld(false);
+    edgeRef.current?.onHold(false);
+    if (!g.panning) {
+      return;
+    }
+    setPanning(false);
+    if (!fling) {
+      return;
+    }
+    const now = performance.now();
+    const win = g.samples.filter((s) => now - s.t <= VELOCITY_WINDOW_MS);
+    if (win.length < 2) {
+      return;
+    }
+    const dt = (now - win[0].t) / 1000;
+    const vx = (win[win.length - 1].x - win[0].x) / Math.max(dt, 0.001);
+    if (Math.abs(vx) >= FLING_MIN_SPEED) {
+      edgeRef.current?.onFling(vx, widthRef.current);
+    }
+  }, []);
+
+  // 卸載與視窗失去焦點時停止邊緣捲動, 並結束按住的手勢.
   useEffect(() => {
-    window.addEventListener("blur", resetZone);
+    const onBlur = () => {
+      resetZone();
+      finishGesture(boxRef.current, null, false);
+    };
+    window.addEventListener("blur", onBlur);
     return () => {
-      window.removeEventListener("blur", resetZone);
+      window.removeEventListener("blur", onBlur);
       resetZone();
     };
-  }, [resetZone]);
+  }, [resetZone, finishGesture]);
 
   // 橫向滑動與 Shift 加滾輪. React 的 wheel 監聽為 passive, 無法 preventDefault, 故直接
   // 掛在元素上. 只攔截橫向移動, 純垂直滾動留給內容區.
@@ -443,12 +514,10 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHov
     // 只在顯示範圍改變時回報.
   }, [from, to]);
 
-  const onMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = Math.min(Math.max(0, e.clientX - rect.left), rect.width);
-    pointer.current = x;
-    if (edge) {
-      const z = x <= EDGE_ZONE ? -1 : x >= width - EDGE_ZONE ? 1 : 0;
+  // 依游標位置判斷是否進入或離開邊緣區. 按住與慣性捲動期間不判斷.
+  const checkZone = useCallback(
+    (x: number) => {
+      const z = x <= EDGE_ZONE ? -1 : x >= widthRef.current - EDGE_ZONE ? 1 : 0;
       if (z !== zone.current) {
         resetZone();
         zone.current = z;
@@ -460,11 +529,78 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHov
           }, EDGE_DWELL_MS);
         }
       }
+    },
+    [resetZone],
+  );
+
+  // 按住與慣性捲動結束後, 游標仍在邊緣區則重新計時.
+  useEffect(() => {
+    if (hasEdge && !held && !flinging && pointer.current !== null) {
+      checkZone(pointer.current);
+    }
+  }, [hasEdge, held, flinging, checkZone]);
+
+  const onMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = Math.min(Math.max(0, e.clientX - rect.left), rect.width);
+    pointer.current = x;
+    if (edge && !gesture.current?.pannable && !edge.flinging) {
+      checkZone(x);
     }
     setHover(describe(x));
     onHover?.(from + (x / Math.max(1, width)) * (to - from));
   };
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!edge || e.button !== 0) {
+      return;
+    }
+    const stopped = edge.onStop();
+    skipClick.current = stopped;
+    const pannable = edge.scrollable;
+    gesture.current = {
+      x0: e.clientX,
+      y0: e.clientY,
+      from0: from,
+      span0: Math.max(1, to - from),
+      pannable,
+      panning: false,
+      samples: [{ t: performance.now(), x: e.clientX }],
+    };
+    if (pannable) {
+      e.currentTarget.setPointerCapture(e.pointerId);
+      resetZone();
+      setHeld(true);
+      edge.onHold(true);
+    }
+  };
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const g = gesture.current;
+    if (!g) {
+      return;
+    }
+    const now = performance.now();
+    g.samples.push({ t: now, x: e.clientX });
+    while (g.samples.length > 2 && now - g.samples[0].t > 2 * VELOCITY_WINDOW_MS) {
+      g.samples.shift();
+    }
+    if (!g.panning && Math.hypot(e.clientX - g.x0, e.clientY - g.y0) > DRAG_THRESHOLD) {
+      skipClick.current = true;
+      if (g.pannable) {
+        g.panning = true;
+        setPanning(true);
+      }
+    }
+    if (g.panning) {
+      edgeRef.current?.onDrag(g.from0 - ((e.clientX - g.x0) / Math.max(1, widthRef.current)) * g.span0);
+    }
+  };
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => finishGesture(e.currentTarget, e.pointerId, true);
+  const onPointerCancel = (e: React.PointerEvent<HTMLDivElement>) => finishGesture(e.currentTarget, e.pointerId, false);
   const onClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (skipClick.current) {
+      skipClick.current = false;
+      return;
+    }
     if (!onPin) {
       return;
     }
@@ -493,7 +629,18 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHov
         <span>50</span>
         <span>0</span>
       </div>
-      <div className="chart-plot" ref={boxRef} onMouseMove={onMove} onMouseLeave={onLeave} onClick={onClick}>
+      <div
+        className={panning ? "chart-plot panning" : edge?.scrollable ? "chart-plot pannable" : "chart-plot"}
+        ref={boxRef}
+        onMouseMove={onMove}
+        onMouseLeave={onLeave}
+        onClick={onClick}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
+        onLostPointerCapture={onPointerCancel}
+      >
         <canvas ref={canvasRef} role="img" aria-label={ariaLabel} />
         {pinX !== null && <div className="chart-pin" style={{ left: pinX }} />}
         {edge?.canLeft && (
@@ -506,8 +653,8 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHov
             <span className={edge.active > 0 ? "chart-edge-arrow active" : "chart-edge-arrow"}>›</span>
           </div>
         )}
-        {hover?.line && <div className="chart-cursor" style={{ left: hover.x }} />}
-        {hover && (
+        {!busy && hover?.line && <div className="chart-cursor" style={{ left: hover.x }} />}
+        {!busy && hover && (
           <div className="chart-tip" style={{ left: tipLeft, right: tipRight }}>
             {hover.lines}
           </div>
