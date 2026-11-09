@@ -616,7 +616,7 @@ button:disabled {
   top: 0;
   bottom: 0;
   width: 1px;
-  background: var(--accent);
+  background: repeating-linear-gradient(to bottom, var(--text) 0 4px, transparent 4px 7px);
   pointer-events: none;
 }
 
