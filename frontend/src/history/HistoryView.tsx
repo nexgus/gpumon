@@ -11,6 +11,7 @@ import {
   defaultCurves,
   historyStore,
   setHistoryLeft,
+  setHistoryPinned,
   setHistoryRange,
   settingsStore,
   showPage,
@@ -115,7 +116,26 @@ export function HistoryView() {
   const collapsed = useStore(settingsStore, (s) => s?.collapsed_gpus);
   const collapsedProcs = useStore(settingsStore, (s) => s?.collapsed_procs);
   const ranges = useStore(choicesStore, (c) => c?.history_ranges) ?? historyRanges;
+  const pinned = useStore(historyStore, (h) => h.pinned);
   const loaded = useInfos(paths);
+
+  // 離開歷史畫面時清除固定時刻.
+  useEffect(() => () => setHistoryPinned(null), []);
+
+  // 有固定時刻且畫面上沒有對話框時, Esc 清除固定時刻. 以擷取階段監聽, 使對話框自己的
+  // Esc 處理先關閉對話框之前即可判斷.
+  useEffect(() => {
+    if (pinned === null) {
+      return;
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !document.querySelector('[role="dialog"]')) {
+        setHistoryPinned(null);
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [pinned !== null]);
 
   const infos = useMemo(() => (loaded ?? []).flatMap((l) => ("info" in l ? [l.info] : [])), [loaded]);
   const min = infos.length > 0 ? Math.min(...infos.map((i) => i.start)) : 0;
@@ -145,12 +165,29 @@ export function HistoryView() {
           {t("history.back")}
         </button>
         <span className="toolbar-title">{t("history.title")}</span>
+        {pinned !== null && (
+          <span className="pin-tag">
+            {t("history.pinned", { time: edgeText(pinned) })}
+            <button
+              type="button"
+              className="pin-tag-clear"
+              aria-label={t("history.clearPin")}
+              title={t("history.clearPin")}
+              onClick={() => setHistoryPinned(null)}
+            >
+              ✕
+            </button>
+          </span>
+        )}
         <span className="flex1" />
         {infos.length > 0 && (
           <JumpForm
             key={paths.join("\n")}
             initial={formatDateTime(Math.round((left + span / 2) / 1e6) * 1e6)}
-            onJump={(us) => setHistoryLeft(us - span / 2)}
+            onJump={(us) => {
+              setHistoryLeft(us - span / 2);
+              setHistoryPinned(Math.min(max, Math.max(min, us)));
+            }}
           />
         )}
         <RangeSelect value={range} ranges={ranges} onChange={onRange} />
@@ -167,6 +204,8 @@ export function HistoryView() {
               curves={curves}
               collapsedGPUs={collapsed?.[l.info.host]}
               procsCollapsed={collapsedProcs?.includes(l.info.host) ?? false}
+              pinned={pinned}
+              onPin={setHistoryPinned}
             />
           ) : (
             <div key={l.path} className="history-group">
@@ -179,8 +218,9 @@ export function HistoryView() {
             </div>
           ),
         )}
+      </div>
         {infos.length > 0 && (
-          <div className="host-block scrubber">
+          <div className="scrubber">
             <span className="scrub-edge">{edgeText(min)}</span>
             <label htmlFor="history-scrub" className="sr-only">
               {t("history.position")}
@@ -199,7 +239,6 @@ export function HistoryView() {
             <span className="scrub-edge">{edgeText(max)}</span>
           </div>
         )}
-      </div>
     </main>
   );
 }

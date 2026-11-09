@@ -105,6 +105,9 @@ export interface GpuRowProps {
   series: ChartSeries[];
   onWidth: (w: number) => void;
   onHover?: (t: number | null) => void;
+  pinned?: number | null;
+  onPin?: (t: number) => void;
+  pinHint?: string;
 }
 
 // GpuRow 為一張 GPU 的卡片. 頂端的標題列左側為 GPU 名稱, 右側為曲線圖例; 其下左側為
@@ -138,6 +141,9 @@ export const GpuRow = memo(function GpuRow(p: GpuRowProps) {
           gapTitle={(start, end) => t("gap.title", { start, end })}
           onWidth={p.onWidth}
           onHover={p.onHover}
+          pinned={p.pinned}
+          onPin={p.onPin}
+          pinHint={p.pinHint}
         />
       </div>
     </section>

@@ -5,7 +5,8 @@
 //   主機分頁, 自 0 起), scenario=design|empty|nogpu, live=0 (不送新取樣),
 //   now=<Unix 秒> (固定目前時刻), dialog=add|edit|delete|password|passphrase|errors|upload|update|queue
 //   (queue 依序送出上傳通知, 錯誤與密碼輸入要求, 只顯示第一個; next=<n> 依序按下前 n 個視窗的主要按鍵),
-//   hover=<0 至 1> (於第 n 張曲線圖的該位置懸停), hoverChart=<n>,
+//   hover=<0 至 1> (於第 n 張曲線圖的該位置懸停), hoverChart=<n>, pin=<0 至 1> (於第 n 張曲線圖
+//   的該位置點選以固定時刻, n 為 hoverChart),
 //   page=recordings|history|settings (顯示該畫面), hrange=<歷史畫面的顯示範圍>,
 //   select=all|<記錄檔清單由上而下的列號, 以逗號分隔, 自 0 起> (勾選), openrec=1 (按 Open,
 //   顯示歷史畫面), confirmdelete=1 (按 Delete, 顯示確認視窗), goto=<YYYY-MM-DD HH:MM:SS>
@@ -191,6 +192,19 @@ function scenario(): void {
         }
       }, 100);
     }, 300);
+  }
+  const pin = params.get("pin");
+  if (pin !== null) {
+    later(() => {
+      const plot = document.querySelectorAll<HTMLElement>(".chart-plot")[Number(params.get("hoverChart") ?? 0)];
+      if (!plot) {
+        return;
+      }
+      const r = plot.getBoundingClientRect();
+      plot.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, clientX: r.left + r.width * Number(pin), clientY: r.top + r.height / 2 }),
+      );
+    }, page === "history" ? 2000 : 800);
   }
   const hover = params.get("hover");
   if (hover !== null) {

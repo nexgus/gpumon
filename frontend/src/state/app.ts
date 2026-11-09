@@ -37,10 +37,12 @@ export interface OperationError {
 }
 
 // HistoryState 為歷史畫面開啟中的記錄檔與顯示範圍的位置. left 為顯示範圍的左緣
-// (Unix 微秒), null 表示尚未決定, 由歷史畫面取捲動範圍的最右端.
+// (Unix 微秒), null 表示尚未決定, 由歷史畫面取捲動範圍的最右端. pinned 為固定時刻
+// (Unix 微秒), 整個歷史畫面共用一個, null 表示未固定; 不存入設定檔.
 export interface HistoryState {
   paths: string[];
   left: number | null;
+  pinned: number | null;
 }
 
 export const hostsStore = new Store<HostStatus[]>([]);
@@ -48,7 +50,7 @@ export const liveStore = new Store<Record<string, Live>>({});
 export const settingsStore = new Store<SettingsData | null>(null);
 export const choicesStore = new Store<Choices | null>(null);
 export const uiStore = new Store<UIState>({ page: "monitor", selected: null });
-export const historyStore = new Store<HistoryState>({ paths: [], left: null });
+export const historyStore = new Store<HistoryState>({ paths: [], left: null, pinned: null });
 export const connectErrorsStore = new Store<ConnectError[]>([]);
 export const operationErrorsStore = new Store<OperationError[]>([]);
 // promptsStore 只存輸入要求的說明 (主機, 種類, 次數), 不含輸入的值.
@@ -345,7 +347,7 @@ export function openRecordings(paths: string[]): void {
   if (paths.length === 0) {
     return;
   }
-  historyStore.set({ paths, left: null });
+  historyStore.set({ paths, left: null, pinned: null });
   showPage("history");
 }
 
@@ -354,12 +356,17 @@ export function forgetRecordings(paths: string[]): void {
   const h = historyStore.get();
   const rest = h.paths.filter((p) => !paths.includes(p));
   if (rest.length !== h.paths.length) {
-    historyStore.set({ paths: rest, left: rest.length === 0 ? null : h.left });
+    historyStore.set({ paths: rest, left: rest.length === 0 ? null : h.left, pinned: null });
   }
 }
 
 export function setHistoryLeft(left: number): void {
   historyStore.update((h) => ({ ...h, left }));
+}
+
+// setHistoryPinned 設定歷史畫面的固定時刻, null 為清除.
+export function setHistoryPinned(pinned: number | null): void {
+  historyStore.update((h) => (h.pinned === pinned ? h : { ...h, pinned }));
 }
 
 // reportOperationFailure 把某項操作失敗的原因顯示於錯誤視窗.

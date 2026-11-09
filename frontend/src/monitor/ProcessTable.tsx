@@ -42,12 +42,14 @@ export const ProcessTable = memo(function ProcessTable({
         <table className="procs-table">
           <thead>
             <tr>
-              <th scope="col">{t("proc.gpu")}</th>
-              <th scope="col" className="num">
+              <th scope="col" className="col-gpu">{t("proc.gpu")}</th>
+              <th scope="col" className="num col-pid">
                 {t("proc.pid")}
               </th>
-              <th scope="col">{t("proc.user")}</th>
-              <th scope="col" className="num">
+              <th scope="col" className="col-user">
+                {t("proc.user")}
+              </th>
+              <th scope="col" className="num col-mem">
                 {t("proc.mem")}
               </th>
               <th scope="col">{t("proc.cmd")}</th>
@@ -73,7 +75,9 @@ export const ProcessTable = memo(function ProcessTable({
                   <td className={`num${mem ? "" : " na"}`}>
                     {mem ? t(mem.unit === "gib" ? "unit.gib" : "unit.mib", { value: mem.value }) : t("value.na")}
                   </td>
-                  <td className="cmd">{p.cmd}</td>
+                  <td className="cmd" title={p.cmd}>
+                    {p.cmd}
+                  </td>
                 </tr>
               );
             })}

@@ -602,6 +602,15 @@ button:disabled {
   pointer-events: none;
 }
 
+.chart-pin {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
 .chart-tip {
   position: absolute;
   top: 6px;
@@ -616,6 +625,15 @@ button:disabled {
   line-height: 1.5;
   white-space: nowrap;
   pointer-events: none;
+}
+
+.chart-tip-hint {
+  margin-top: 4px;
+  padding-top: 3px;
+  border-top: 1px solid var(--border);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  color: var(--text-3);
 }
 
 .chart-tip-head {
@@ -666,7 +684,24 @@ button:disabled {
 
 .procs-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
+}
+
+.procs-table .col-gpu {
+  width: 76px;
+}
+
+.procs-table .col-pid {
+  width: 84px;
+}
+
+.procs-table .col-user {
+  width: 128px;
+}
+
+.procs-table .col-mem {
+  width: 120px;
 }
 
 .procs-table th {
@@ -684,6 +719,8 @@ button:disabled {
   font-family: var(--font-mono);
   font-size: 12px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .procs-table .num {
@@ -695,9 +732,12 @@ button:disabled {
 }
 
 .procs-table td.cmd {
-  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--text-2);
 }
+
+
 
 .procs-table td.procs-empty {
   font-family: var(--font-sans);
@@ -965,10 +1005,49 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex: none;
+  box-sizing: border-box;
   padding: 8px 14px;
-  position: sticky;
-  bottom: 0;
-  margin-top: auto;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+
+.pin-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 24px;
+  padding: 0 2px 0 10px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.pin-tag-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.pin-tag-clear:hover {
+  color: var(--text);
+}
+
+.pin-tag-clear:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .scrub-edge {

@@ -54,6 +54,11 @@ export interface ChartProps {
   onWidth?: (width: number) => void;
   // onHover 回報滑鼠所指的時刻; 滑鼠離開時為 null.
   onHover?: (t: number | null) => void;
+  // pinned 為固定時刻, 位於 [from, to] 內時畫一條固定線. onPin 於點選繪圖區時回報該處
+  // 的時刻. pinHint 為數值提示最下方的操作說明. 三者皆省略時 (監看畫面) 不啟用.
+  pinned?: number | null;
+  onPin?: (t: number) => void;
+  pinHint?: string;
 }
 
 const TICKS = 6;
@@ -259,7 +264,7 @@ export const ChartLegend = memo(function ChartLegend({ series }: { series: Chart
 });
 
 // 曲線圖的高度由外層的版面決定, 繪圖區的寬與高皆隨外框改變而重繪.
-function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHover }: ChartProps) {
+function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHover, pinned, onPin, pinHint }: ChartProps) {
   const boxRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -316,6 +321,7 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHov
               <>
                 <div className="chart-tip-head">{gap.title ?? gapTitle(formatClock(gap.start), formatClock(gap.end))}</div>
                 <div>{gap.detail}</div>
+                {pinHint && <div className="chart-tip-hint">{pinHint}</div>}
               </>
             ),
           };
@@ -336,6 +342,7 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHov
                     <span className="chart-tip-value">{s.format(i)}</span>
                   </div>
                 ))}
+                {pinHint && <div className="chart-tip-hint">{pinHint}</div>}
               </>
             ),
           };
@@ -343,7 +350,7 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHov
       }
       return null;
     },
-    [data, series, from, to, width, gapTitle],
+    [data, series, from, to, width, gapTitle, pinHint],
   );
 
   // 資料更新時, 滑鼠仍停在圖上則以新資料重算懸停讀數.
@@ -360,12 +367,24 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHov
     setHover(describe(x));
     onHover?.(from + (x / Math.max(1, width)) * (to - from));
   };
+  const onClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!onPin) {
+      return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = Math.min(Math.max(0, e.clientX - rect.left), rect.width);
+    onPin(from + (x / Math.max(1, width)) * (to - from));
+  };
   const onLeave = () => {
     pointer.current = null;
     setHover(null);
     onHover?.(null);
   };
 
+  const pinX =
+    pinned !== null && pinned !== undefined && width > 0 && pinned >= from && pinned <= to
+      ? ((pinned - from) / Math.max(1, to - from)) * width
+      : null;
   const tipLeft = hover && width > 0 && hover.x > width * 0.62 ? undefined : hover ? hover.x + 8 : undefined;
   const tipRight = hover && width > 0 && hover.x > width * 0.62 ? width - hover.x + 8 : undefined;
 
@@ -376,8 +395,9 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHov
         <span>50</span>
         <span>0</span>
       </div>
-      <div className="chart-plot" ref={boxRef} onMouseMove={onMove} onMouseLeave={onLeave}>
+      <div className="chart-plot" ref={boxRef} onMouseMove={onMove} onMouseLeave={onLeave} onClick={onClick}>
         <canvas ref={canvasRef} role="img" aria-label={ariaLabel} />
+        {pinX !== null && <div className="chart-pin" style={{ left: pinX }} />}
         {hover?.line && <div className="chart-cursor" style={{ left: hover.x }} />}
         {hover && (
           <div className="chart-tip" style={{ left: tipLeft, right: tipRight }}>

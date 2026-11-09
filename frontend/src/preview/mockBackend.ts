@@ -274,7 +274,7 @@ function makeLive(h: MockHost): Live {
       ? [
           { gpu: 0, pid: 48211, user: "sweetener", mem: 41.8 * GiB, util: 80, cmd: "python train.py --config configs/vit_l.yaml" },
           { gpu: 0, pid: 48377, user: "mlin", mem: 16.6 * GiB, util: 7, cmd: "python -m vllm.entrypoints.openai.api_server" },
-          { gpu: 1, pid: 51902, user: "sweetener", mem: 22.1 * GiB, util: 34, cmd: "python eval.py --ckpt runs/1104/last.pt" },
+          { gpu: 1, pid: 51902, user: "sweetener", mem: 22.1 * GiB, util: 34, cmd: "python eval.py --ckpt runs/1104/last.pt --data /mnt/datasets/imagenet-21k/train --workers 32 --batch-size 256 --precision bf16 --log-dir /home/sweetener/experiments/2026-11/vit_l_eval_run_0042" },
           { gpu: 2, pid: 2217, user: "sweetener", mem: null, util: null, cmd: "/usr/lib/xorg/Xorg" },
         ]
       : h.seed === 2

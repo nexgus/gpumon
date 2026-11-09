@@ -28,11 +28,15 @@ export interface HistoryBlockProps {
   curves: Curve[];
   collapsedGPUs: number[] | undefined;
   procsCollapsed: boolean;
+  // pinned 為歷史畫面共用的固定時刻 (Unix 微秒), null 為未固定. onPin 於點選曲線圖時
+  // 回報該處的時刻.
+  pinned: number | null;
+  onPin: (t: number) => void;
 }
 
 // HistoryBlock 為歷史畫面中一個記錄檔的分組: 一行分組標題, 其下為每張 GPU 的卡片與
-// 程序卡片. 文字讀數與程序卡片顯示滑鼠在本分組曲線圖上所指的時刻, 滑鼠不在曲線圖上
-// 時顯示顯示範圍右緣的時刻.
+// 程序卡片. 文字讀數與程序卡片顯示滑鼠在本分組曲線圖上所指的時刻; 滑鼠不在曲線圖
+// 上時, 有固定時刻則顯示固定時刻, 否則顯示顯示範圍右緣的時刻.
 export const HistoryBlock = memo(function HistoryBlock({
   info,
   from,
@@ -40,6 +44,8 @@ export const HistoryBlock = memo(function HistoryBlock({
   curves,
   collapsedGPUs,
   procsCollapsed,
+  pinned,
+  onPin,
 }: HistoryBlockProps) {
   const t = useT();
   const gpus = info.devices?.gpus ?? noDevices;
@@ -55,6 +61,19 @@ export const HistoryBlock = memo(function HistoryBlock({
   const onToggleProcs = useCallback((c: boolean) => void setProcessesCollapsed(info.host, c), [info.host]);
 
   const result = useCurveFeed(info.path, anyExpanded, from, to, chartWidth, historyFields, queryRecording);
+
+  // 固定時刻離開顯示範圍時, 文字讀數另查詢以固定時刻為中心的同寬範圍.
+  const pinOutside = pinned !== null && (pinned < from || pinned > to);
+  const half = (to - from) / 2;
+  const pinResult = useCurveFeed(
+    info.path,
+    anyExpanded && pinOutside,
+    pinOutside ? pinned - half : from,
+    pinOutside ? pinned + half : to,
+    chartWidth,
+    historyFields,
+    queryRecording,
+  );
 
   // 記錄檔起訖之外的時段沒有資料, 以無資料時段標示.
   const outside = useMemo((): ChartGap[] => {
@@ -89,7 +108,9 @@ export const HistoryBlock = memo(function HistoryBlock({
     return m;
   }, [result, gpus, curves, t]);
 
-  const readAt = hover ?? to;
+  const readAt = hover ?? pinned ?? to;
+  const readResult = hover === null && pinOutside ? pinResult : result;
+  const pinHint = t(pinned === null ? "history.pinHint" : "history.repinHint");
   const procs = useProcessesAt(info.path, readAt);
 
   return (
@@ -105,7 +126,7 @@ export const HistoryBlock = memo(function HistoryBlock({
         <GpuRow
           key={g.id}
           device={g}
-          gpu={liveAt(result, g.id, readAt)}
+          gpu={liveAt(readResult, g.id, readAt)}
           collapsed={collapsed.includes(g.id)}
           onToggle={onToggle}
           from={from}
@@ -114,6 +135,9 @@ export const HistoryBlock = memo(function HistoryBlock({
           series={seriesByGPU.get(g.id) ?? []}
           onWidth={onWidth}
           onHover={setHover}
+          pinned={pinned}
+          onPin={onPin}
+          pinHint={pinHint}
         />
       ))}
       {gpus.length > 0 && (
