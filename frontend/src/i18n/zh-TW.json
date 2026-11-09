@@ -169,7 +169,6 @@
   "history.goTo": "跳至",
   "history.go": "前往",
   "history.goInvalid": "請以 YYYY-MM-DD HH:MM:SS 的格式輸入日期與時間。",
-  "history.position": "時間位置",
   "history.pinned": "已固定 {time}",
   "history.clearPin": "清除固定的時刻",
   "history.pinHint": "點選以固定此時刻",

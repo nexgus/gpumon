@@ -1,7 +1,8 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { backend } from "../api/backend";
 import { serviceError } from "../api/errors";
 import type { RecordingInfo, TimeRange } from "../api/types";
+import type { ChartEdge } from "../chart/Chart";
 import { ArrowLeftIcon } from "../components/Icons";
 import { formatClock, formatDateTime, parseDateTime, rangeMicros } from "../format";
 import { useT } from "../i18n";
@@ -21,6 +22,8 @@ import { HistoryBlock } from "./HistoryBlock";
 
 const historyRanges: TimeRange[] = ["1m", "5m", "15m", "30m", "60m", "3h", "6h", "12h", "24h", "all"];
 const minSpan = 1e6;
+// 邊緣自動捲動每秒移動顯示範圍長度的比例.
+const edgeSpeed = 0.1;
 
 type Loaded = { path: string; info: RecordingInfo } | { path: string; error: string };
 
@@ -105,7 +108,8 @@ function JumpForm({ onJump, initial }: { onJump: (us: number) => void; initial: 
   );
 }
 
-// HistoryView 為歷史畫面: 頂端為工具列, 其下為每個記錄檔一個的分組, 底端為時間捲動條.
+// HistoryView 為歷史畫面: 頂端為工具列, 其下為每個記錄檔一個的分組. 時間捲動由曲線圖
+// 邊緣自動捲動與橫向滾動達成.
 // 所有分組共用同一個顯示範圍, 捲動範圍為所開啟檔案中最早的開始時刻到最晚的結束時刻.
 export function HistoryView() {
   const t = useT();
@@ -153,9 +157,55 @@ export function HistoryView() {
     void setHistoryRange(r);
   };
 
+  const scrollable = infos.length > 0 && maxLeft > min && range !== "all";
+
+  // 捲動所需的最新值. 滾輪與自動捲動可能在重新繪製之間連續觸發, 位置以此為準.
+  const view = useRef({ left, span, min, maxLeft, scrollable });
+  view.current = { left, span, min, maxLeft, scrollable };
+  const moveBy = useCallback((delta: number): boolean => {
+    const v = view.current;
+    const next = Math.min(v.maxLeft, Math.max(v.min, v.left + delta));
+    if (next === v.left) {
+      return false;
+    }
+    v.left = next;
+    setHistoryLeft(next);
+    return true;
+  }, []);
+
+  const [edgeDir, setEdgeDir] = useState(0);
+  const dir = scrollable ? edgeDir : 0;
+  useEffect(() => {
+    if (dir === 0) {
+      return;
+    }
+    let last = performance.now();
+    let id = requestAnimationFrame(function step(now) {
+      const dt = now - last;
+      last = now;
+      if (!moveBy(dir * edgeSpeed * view.current.span * (dt / 1000))) {
+        setEdgeDir(0);
+        return;
+      }
+      id = requestAnimationFrame(step);
+    });
+    return () => cancelAnimationFrame(id);
+  }, [dir, moveBy]);
+
+  const onPan = useCallback((frac: number) => void moveBy(frac * view.current.span), [moveBy]);
+  const edge = useMemo(
+    (): ChartEdge => ({
+      canLeft: scrollable && left > min,
+      canRight: scrollable && left < maxLeft,
+      active: dir,
+      onEdge: setEdgeDir,
+      onPan,
+    }),
+    [scrollable, left, min, maxLeft, dir, onPan],
+  );
+
   const sameDay = formatDateTime(min).slice(0, 10) === formatDateTime(max).slice(0, 10);
   const edgeText = (us: number) => (sameDay ? formatClock(us) : formatDateTime(us));
-  const scrollable = infos.length > 0 && maxLeft > min && range !== "all";
 
   return (
     <main className="main">
@@ -206,6 +256,7 @@ export function HistoryView() {
               procsCollapsed={collapsedProcs?.includes(l.info.host) ?? false}
               pinned={pinned}
               onPin={setHistoryPinned}
+              edge={edge}
             />
           ) : (
             <div key={l.path} className="history-group">
@@ -219,26 +270,6 @@ export function HistoryView() {
           ),
         )}
       </div>
-        {infos.length > 0 && (
-          <div className="scrubber">
-            <span className="scrub-edge">{edgeText(min)}</span>
-            <label htmlFor="history-scrub" className="sr-only">
-              {t("history.position")}
-            </label>
-            <input
-              id="history-scrub"
-              type="range"
-              className="scrub-input"
-              min={0}
-              max={Math.max(1, Math.round((maxLeft - min) / 1000))}
-              step={1}
-              value={Math.round((left - min) / 1000)}
-              disabled={!scrollable}
-              onChange={(e) => setHistoryLeft(min + Number(e.target.value) * 1000)}
-            />
-            <span className="scrub-edge">{edgeText(max)}</span>
-          </div>
-        )}
     </main>
   );
 }

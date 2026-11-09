@@ -5,7 +5,7 @@
 //   主機分頁, 自 0 起), scenario=design|empty|nogpu, live=0 (不送新取樣),
 //   now=<Unix 秒> (固定目前時刻), dialog=add|edit|delete|password|passphrase|errors|upload|update|queue
 //   (queue 依序送出上傳通知, 錯誤與密碼輸入要求, 只顯示第一個; next=<n> 依序按下前 n 個視窗的主要按鍵),
-//   hover=<0 至 1> (於第 n 張曲線圖的該位置懸停), hoverChart=<n>, pin=<0 至 1> (於第 n 張曲線圖
+//   hover=<0 至 1> (於第 n 張曲線圖的該位置懸停, 歷史畫面中靠近 0 或 1 即位於邊緣區), hoverChart=<n>, pin=<0 至 1> (於第 n 張曲線圖
 //   的該位置點選以固定時刻, n 為 hoverChart),
 //   page=recordings|history|settings (顯示該畫面), hrange=<歷史畫面的顯示範圍>,
 //   select=all|<記錄檔清單由上而下的列號, 以逗號分隔, 自 0 起> (勾選), openrec=1 (按 Open,

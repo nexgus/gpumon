@@ -59,9 +59,25 @@ export interface ChartProps {
   pinned?: number | null;
   onPin?: (t: number) => void;
   pinHint?: string;
+  // edge 於歷史畫面傳入, 啟用邊緣提示, 邊緣自動捲動與橫向滾動; 省略時 (監看畫面) 不啟用.
+  edge?: ChartEdge;
+}
+
+// ChartEdge 為曲線圖的橫向捲動介面. canLeft 與 canRight 表示該側還有資料可捲動.
+// active 為正在自動捲動的方向 (-1 往較早, 1 往較晚, 0 為未捲動). onEdge 於游標在邊緣區
+// 停留夠久時回報方向, 離開邊緣區時回報 0. onPan 回報橫向滾動的位移, 單位為繪圖區寬度
+// 的倍數, 正值往較晚的時間.
+export interface ChartEdge {
+  canLeft: boolean;
+  canRight: boolean;
+  active: number;
+  onEdge: (dir: number) => void;
+  onPan: (frac: number) => void;
 }
 
 const TICKS = 6;
+const EDGE_ZONE = 24;
+const EDGE_DWELL_MS = 300;
 
 function cssVar(el: Element, name: string): string {
   return getComputedStyle(el).getPropertyValue(name).trim();
@@ -264,7 +280,7 @@ export const ChartLegend = memo(function ChartLegend({ series }: { series: Chart
 });
 
 // 曲線圖的高度由外層的版面決定, 繪圖區的寬與高皆隨外框改變而重繪.
-function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHover, pinned, onPin, pinHint }: ChartProps) {
+function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHover, pinned, onPin, pinHint, edge }: ChartProps) {
   const boxRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -272,6 +288,65 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHov
   const [theme, setTheme] = useState(0);
   const [hover, setHover] = useState<Hover | null>(null);
   const pointer = useRef<number | null>(null);
+  const edgeRef = useRef(edge);
+  edgeRef.current = edge;
+  const widthRef = useRef(0);
+  widthRef.current = width;
+  const zone = useRef(0);
+  const reported = useRef(false);
+  const dwell = useRef<number | undefined>(undefined);
+
+  // 清除邊緣區的停留計時, 並在已回報捲動時回報停止.
+  const resetZone = useCallback(() => {
+    window.clearTimeout(dwell.current);
+    dwell.current = undefined;
+    zone.current = 0;
+    if (reported.current) {
+      reported.current = false;
+      edgeRef.current?.onEdge(0);
+    }
+  }, []);
+
+  // 卸載與視窗失去焦點時停止邊緣捲動.
+  useEffect(() => {
+    window.addEventListener("blur", resetZone);
+    return () => {
+      window.removeEventListener("blur", resetZone);
+      resetZone();
+    };
+  }, [resetZone]);
+
+  // 橫向滑動與 Shift 加滾輪. React 的 wheel 監聽為 passive, 無法 preventDefault, 故直接
+  // 掛在元素上. 只攔截橫向移動, 純垂直滾動留給內容區.
+  const hasEdge = edge !== undefined;
+  useEffect(() => {
+    const box = boxRef.current;
+    if (!box || !hasEdge) {
+      return;
+    }
+    const onWheel = (e: WheelEvent) => {
+      const ed = edgeRef.current;
+      if (!ed || (!ed.canLeft && !ed.canRight)) {
+        return;
+      }
+      let d = e.deltaX;
+      if (d === 0 && e.shiftKey) {
+        d = e.deltaY;
+      }
+      if (d === 0) {
+        return;
+      }
+      if (e.deltaMode === 1) {
+        d *= 16;
+      } else if (e.deltaMode === 2) {
+        d *= widthRef.current;
+      }
+      e.preventDefault();
+      ed.onPan(d / Math.max(1, widthRef.current));
+    };
+    box.addEventListener("wheel", onWheel, { passive: false });
+    return () => box.removeEventListener("wheel", onWheel);
+  }, [hasEdge]);
 
   useLayoutEffect(() => {
     const box = boxRef.current;
@@ -360,10 +435,32 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHov
     }
   }, [describe]);
 
+  // 捲動使顯示範圍移動時, 游標不動而所指的時刻改變, 須重新回報.
+  useEffect(() => {
+    if (pointer.current !== null && width > 0) {
+      onHover?.(from + (pointer.current / width) * (to - from));
+    }
+    // 只在顯示範圍改變時回報.
+  }, [from, to]);
+
   const onMove = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const x = Math.min(Math.max(0, e.clientX - rect.left), rect.width);
     pointer.current = x;
+    if (edge) {
+      const z = x <= EDGE_ZONE ? -1 : x >= width - EDGE_ZONE ? 1 : 0;
+      if (z !== zone.current) {
+        resetZone();
+        zone.current = z;
+        if (z !== 0) {
+          dwell.current = window.setTimeout(() => {
+            dwell.current = undefined;
+            reported.current = true;
+            edgeRef.current?.onEdge(z);
+          }, EDGE_DWELL_MS);
+        }
+      }
+    }
     setHover(describe(x));
     onHover?.(from + (x / Math.max(1, width)) * (to - from));
   };
@@ -376,6 +473,7 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHov
     onPin(from + (x / Math.max(1, width)) * (to - from));
   };
   const onLeave = () => {
+    resetZone();
     pointer.current = null;
     setHover(null);
     onHover?.(null);
@@ -398,6 +496,16 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHov
       <div className="chart-plot" ref={boxRef} onMouseMove={onMove} onMouseLeave={onLeave} onClick={onClick}>
         <canvas ref={canvasRef} role="img" aria-label={ariaLabel} />
         {pinX !== null && <div className="chart-pin" style={{ left: pinX }} />}
+        {edge?.canLeft && (
+          <div className="chart-edge chart-edge-left" aria-hidden="true">
+            <span className={edge.active < 0 ? "chart-edge-arrow active" : "chart-edge-arrow"}>‹</span>
+          </div>
+        )}
+        {edge?.canRight && (
+          <div className="chart-edge chart-edge-right" aria-hidden="true">
+            <span className={edge.active > 0 ? "chart-edge-arrow active" : "chart-edge-arrow"}>›</span>
+          </div>
+        )}
         {hover?.line && <div className="chart-cursor" style={{ left: hover.x }} />}
         {hover && (
           <div className="chart-tip" style={{ left: tipLeft, right: tipRight }}>

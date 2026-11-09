@@ -1,6 +1,6 @@
 import { memo } from "react";
 import type { Device, LiveGPU } from "../api/types";
-import { Chart, ChartLegend, type ChartData, type ChartSeries } from "../chart/Chart";
+import { Chart, ChartLegend, type ChartData, type ChartEdge, type ChartSeries } from "../chart/Chart";
 import { ChevronDown, ChevronRight } from "../components/Icons";
 import { gib } from "../format";
 import { useT, type Translator } from "../i18n";
@@ -108,6 +108,7 @@ export interface GpuRowProps {
   pinned?: number | null;
   onPin?: (t: number) => void;
   pinHint?: string;
+  edge?: ChartEdge;
 }
 
 // GpuRow 為一張 GPU 的卡片. 頂端的標題列左側為 GPU 名稱, 右側為曲線圖例; 其下左側為
@@ -144,6 +145,7 @@ export const GpuRow = memo(function GpuRow(p: GpuRowProps) {
           pinned={p.pinned}
           onPin={p.onPin}
           pinHint={p.pinHint}
+          edge={p.edge}
         />
       </div>
     </section>

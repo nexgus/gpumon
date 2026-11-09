@@ -611,6 +611,40 @@ button:disabled {
   pointer-events: none;
 }
 
+/* 歷史畫面曲線圖左右邊緣的捲動提示. */
+.chart-edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  width: 24px;
+  pointer-events: none;
+}
+
+.chart-edge-left {
+  left: 0;
+  justify-content: flex-start;
+  background: linear-gradient(to right, color-mix(in srgb, var(--text-3) 30%, transparent), transparent);
+}
+
+.chart-edge-right {
+  right: 0;
+  justify-content: flex-end;
+  background: linear-gradient(to left, color-mix(in srgb, var(--text-3) 30%, transparent), transparent);
+}
+
+.chart-edge-arrow {
+  padding: 0 4px;
+  color: var(--text-3);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.chart-edge-arrow.active {
+  color: var(--accent);
+}
+
 .chart-tip {
   position: absolute;
   top: 6px;
@@ -1001,17 +1035,6 @@ button:disabled {
   color: var(--err);
 }
 
-.scrubber {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex: none;
-  box-sizing: border-box;
-  padding: 8px 14px;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-}
-
 .pin-tag {
   display: inline-flex;
   align-items: center;
@@ -1048,19 +1071,6 @@ button:disabled {
 .pin-tag-clear:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
-}
-
-.scrub-edge {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-2);
-  white-space: nowrap;
-}
-
-.scrub-input {
-  flex: 1;
-  min-width: 0;
-  accent-color: var(--accent);
 }
 
 /* 歷史畫面. 每個記錄檔一個分組, 分組之間的間距大於分組內卡片之間的間距. */

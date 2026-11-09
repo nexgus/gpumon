@@ -1,7 +1,7 @@
 import { memo, useCallback, useMemo, useState } from "react";
 import { backend } from "../api/backend";
 import type { Curve, Device, Field, LiveProcess, QueryResult, RecordingInfo } from "../api/types";
-import type { ChartGap } from "../chart/Chart";
+import type { ChartEdge, ChartGap } from "../chart/Chart";
 import { gpuSeries, toChartData } from "../chart/gpuSeries";
 import { formatClock, formatDateRange } from "../format";
 import { useT } from "../i18n";
@@ -32,6 +32,8 @@ export interface HistoryBlockProps {
   // 回報該處的時刻.
   pinned: number | null;
   onPin: (t: number) => void;
+  // edge 為曲線圖的橫向捲動介面, 所有分組共用.
+  edge: ChartEdge;
 }
 
 // HistoryBlock 為歷史畫面中一個記錄檔的分組: 一行分組標題, 其下為每張 GPU 的卡片與
@@ -46,6 +48,7 @@ export const HistoryBlock = memo(function HistoryBlock({
   procsCollapsed,
   pinned,
   onPin,
+  edge,
 }: HistoryBlockProps) {
   const t = useT();
   const gpus = info.devices?.gpus ?? noDevices;
@@ -138,6 +141,7 @@ export const HistoryBlock = memo(function HistoryBlock({
           pinned={pinned}
           onPin={onPin}
           pinHint={pinHint}
+          edge={edge}
         />
       ))}
       {gpus.length > 0 && (
