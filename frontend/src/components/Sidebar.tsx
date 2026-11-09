@@ -36,9 +36,14 @@ const HostItem = memo(function HostItem({
   const [busy, setBusy] = useState(false);
   const editable = canEdit(host);
   const toggle = async () => {
+    const connecting = host.state === "disconnected";
+    // 按下 "連線" 時切換至該主機的監看畫面, 讓使用者看到連線進度; "中斷連線" 不切換畫面.
+    if (connecting) {
+      selectHost(host.id);
+    }
     setBusy(true);
     try {
-      await (host.state === "disconnected" ? connect(host.id) : disconnect(host.id));
+      await (connecting ? connect(host.id) : disconnect(host.id));
     } finally {
       setBusy(false);
     }
