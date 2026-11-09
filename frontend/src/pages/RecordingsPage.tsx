@@ -5,7 +5,7 @@ import type { RecordingFile, RecordingListing } from "../api/types";
 import { DeleteIcon } from "../components/Icons";
 import { formatDateRange, formatDateTime, formatDuration, formatSize } from "../format";
 import { useT, type Translator } from "../i18n";
-import { forgetRecordings, openRecordings, reportOperationFailure } from "../state/app";
+import { openRecording, reportOperationFailure } from "../state/app";
 import { DeleteRecordingsDialog } from "../dialogs/DeleteRecordingsDialog";
 
 function fileCount(n: number, t: Translator): string {
@@ -33,9 +33,11 @@ interface RowProps {
   note?: string;
   duration?: string;
   size: string;
+  onOpen?: () => void;
+  openText?: string;
 }
 
-function Row({ id, checked, onChange, muted, label, note, duration, size }: RowProps) {
+function Row({ id, checked, onChange, muted, label, note, duration, size, onOpen, openText }: RowProps) {
   return (
     <li className={`rec-row${checked ? " checked" : ""}${muted ? " muted" : ""}`}>
       <input id={id} type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
@@ -45,12 +47,17 @@ function Row({ id, checked, onChange, muted, label, note, duration, size }: RowP
       <span className="rec-note">{note}</span>
       <span className="rec-duration">{duration}</span>
       <span className="rec-size">{size}</span>
+      {onOpen && (
+        <button type="button" className="btn btn-sm" onClick={onOpen}>
+          {openText}
+        </button>
+      )}
     </li>
   );
 }
 
-// RecordingsPage 為記錄檔清單: 依主機分組, 可勾選任意多個檔案開啟於歷史畫面或刪除.
-// 連線中的記錄檔可開啟, 不可刪除; 無法開啟的檔案列於清單末端, 不計入任何總計.
+// RecordingsPage 為記錄檔清單: 依主機分組, 每個檔案可個別開啟於歷史畫面, 亦可勾選任意
+// 多個檔案刪除. 連線中的記錄檔可開啟, 不可刪除; 無法開啟的檔案列於清單末端, 不計入任何總計.
 export function RecordingsPage() {
   const t = useT();
   const [listing, setListing] = useState<RecordingListing | null>(null);
@@ -79,7 +86,6 @@ export function RecordingsPage() {
   const totalSize = files.reduce((n, f) => n + f.size, 0);
   const everyPath = useMemo(() => [...files.map((f) => f.path), ...skipped.map((s) => s.path)], [files, skipped]);
 
-  const openable = files.filter((f) => selected.has(f.path));
   const deletable = [...files.filter((f) => selected.has(f.path) && !f.active), ...skipped.filter((s) => selected.has(s.path))];
   const deletableSize = deletable.reduce((n, f) => n + f.size, 0);
 
@@ -96,19 +102,11 @@ export function RecordingsPage() {
 
   const allSelected = everyPath.length > 0 && everyPath.every((p) => selected.has(p));
 
-  const open = () => {
-    // 歷史畫面的區塊依主機的順序排列, 同一台主機的檔案依起始時刻由早到晚.
-    const order = files.filter((f) => selected.has(f.path)).map((f) => f.path);
-    openRecordings(order);
-  };
-
   const doDelete = async () => {
     setConfirming(false);
     const paths = deletable.map((f) => f.path);
     try {
       const results = await backend.deleteRecordings(paths);
-      const removed = results.filter((r) => !r.error).map((r) => r.path);
-      forgetRecordings(removed);
       for (const r of results.filter((x) => x.error)) {
         reportOperationFailure(baseName(r.path), { code: r.code || "failed", message: r.error });
       }
@@ -135,9 +133,6 @@ export function RecordingsPage() {
           onClick={() => setSelected(allSelected ? new Set() : new Set(everyPath))}
         >
           {t("recordings.selectAll")}
-        </button>
-        <button type="button" className="btn btn-primary" disabled={openable.length === 0} onClick={open}>
-          {openable.length > 0 ? t("recordings.openCount", { count: openable.length }) : t("recordings.open")}
         </button>
         <button type="button" className="btn" disabled={deletable.length === 0} onClick={() => setConfirming(true)}>
           <DeleteIcon />
@@ -168,6 +163,8 @@ export function RecordingsPage() {
                   note={f.active ? t("recordings.active") : f.has_data ? undefined : t("recordings.noData")}
                   duration={f.has_data ? formatDuration(f.end - f.start, t) : undefined}
                   size={formatSize(f.size, t)}
+                  onOpen={() => openRecording(f.path)}
+                  openText={t("recordings.open")}
                 />
               ))}
             </ul>

@@ -35,11 +35,12 @@ export interface OperationError {
   error: ServiceError;
 }
 
-// HistoryState 為歷史畫面開啟中的記錄檔與顯示範圍的位置. left 為顯示範圍的左緣
-// (Unix 微秒), null 表示尚未決定, 由歷史畫面取捲動範圍的最右端. pinned 為固定時刻
-// (Unix 微秒), 整個歷史畫面共用一個, null 表示未固定; 不存入設定檔.
+// HistoryState 為歷史畫面開啟中的記錄檔與顯示範圍的位置. path 為開啟中記錄檔的路徑,
+// null 表示沒有開啟中的記錄檔. left 為顯示範圍的左緣 (Unix 微秒), null 表示尚未決定,
+// 由歷史畫面取捲動範圍的最右端. pinned 為固定時刻 (Unix 微秒), null 表示未固定; 不存入
+// 設定檔.
 export interface HistoryState {
-  paths: string[];
+  path: string | null;
   left: number | null;
   pinned: number | null;
 }
@@ -49,7 +50,7 @@ export const liveStore = new Store<Record<string, Live>>({});
 export const settingsStore = new Store<SettingsData | null>(null);
 export const choicesStore = new Store<Choices | null>(null);
 export const uiStore = new Store<UIState>({ page: "monitor", selected: null });
-export const historyStore = new Store<HistoryState>({ paths: [], left: null, pinned: null });
+export const historyStore = new Store<HistoryState>({ path: null, left: null, pinned: null });
 export const connectErrorsStore = new Store<ConnectError[]>([]);
 export const operationErrorsStore = new Store<OperationError[]>([]);
 // promptsStore 只存輸入要求的說明 (主機, 種類, 次數), 不含輸入的值.
@@ -58,6 +59,13 @@ export const promptsStore = new Store<Prompt[]>([]);
 export const uploadsStore = new Store<UploadNotice[]>([]);
 // quitStore 為等待使用者確認的結束要求; 再次要求結束時以新的主機數取代.
 export const quitStore = new Store<QuitRequest | null>(null);
+
+// 主區域離開歷史畫面即關閉開啟中的記錄檔, 一併清除其顯示位置與固定時刻.
+uiStore.subscribe(() => {
+  if (uiStore.get().page !== "history" && historyStore.get().path !== null) {
+    historyStore.set({ path: null, left: null, pinned: null });
+  }
+});
 
 // 密碼輸入視窗, 上傳通知視窗, 連線錯誤視窗, 操作失敗視窗與結束確認視窗同一時間只
 // 顯示一個. modalQueueStore 依出現的先後排列這些視窗, 只顯示第一個; 新出現的視窗排在
@@ -357,33 +365,15 @@ export function selectHost(id: string): void {
   uiStore.update((u) => ({ ...u, page: "monitor", selected: id }));
 }
 
-// showRecordings 為側欄 "記錄檔" 的行為: 已有開啟中的記錄檔時顯示歷史畫面, 否則顯示
-// 記錄檔清單. 已在記錄檔清單時不變.
+// showRecordings 為側欄 "記錄檔" 的行為: 顯示記錄檔清單.
 export function showRecordings(): void {
-  uiStore.update((u) => {
-    if (u.page === "recordings") {
-      return u;
-    }
-    return { ...u, page: historyStore.get().paths.length > 0 ? "history" : "recordings" };
-  });
+  showPage("recordings");
 }
 
-// openRecordings 以 paths 取代歷史畫面開啟中的記錄檔並顯示歷史畫面.
-export function openRecordings(paths: string[]): void {
-  if (paths.length === 0) {
-    return;
-  }
-  historyStore.set({ paths, left: null, pinned: null });
+// openRecording 開啟 path 的記錄檔並顯示歷史畫面.
+export function openRecording(path: string): void {
+  historyStore.set({ path, left: null, pinned: null });
   showPage("history");
-}
-
-// forgetRecordings 於記錄檔被刪除後自歷史畫面開啟中的記錄檔移除.
-export function forgetRecordings(paths: string[]): void {
-  const h = historyStore.get();
-  const rest = h.paths.filter((p) => !paths.includes(p));
-  if (rest.length !== h.paths.length) {
-    historyStore.set({ paths: rest, left: rest.length === 0 ? null : h.left, pinned: null });
-  }
 }
 
 export function setHistoryLeft(left: number): void {

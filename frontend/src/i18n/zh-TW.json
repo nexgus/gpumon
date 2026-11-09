@@ -148,7 +148,6 @@
   "recordings.summary": "{files}，{size}",
   "recordings.selectAll": "全選",
   "recordings.open": "開啟",
-  "recordings.openCount": "開啟（{count}）",
   "recordings.deleteCount": "刪除（{count}）",
   "recordings.now": "現在",
   "recordings.active": "正在記錄中，可以開啟，但不可刪除。",

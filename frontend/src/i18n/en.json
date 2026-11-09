@@ -167,7 +167,6 @@
   "recordings.summary": "{files}, {size}",
   "recordings.selectAll": "Select All",
   "recordings.open": "Open",
-  "recordings.openCount": "Open ({count})",
   "recordings.deleteCount": "Delete ({count})",
   "recordings.now": "now",
   "recordings.active": "Recording in progress. It can be opened but not deleted.",

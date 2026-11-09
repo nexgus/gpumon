@@ -3,7 +3,7 @@ import { backend } from "../api/backend";
 import type { Curve, Device, Field, LiveProcess, QueryResult, RecordingInfo } from "../api/types";
 import type { ChartEdge, ChartGap } from "../chart/Chart";
 import { gpuSeries, toChartData } from "../chart/gpuSeries";
-import { formatClock, formatDateRange } from "../format";
+import { formatClock } from "../format";
 import { useT } from "../i18n";
 import { setGPUCollapsed, setProcessesCollapsed } from "../state/app";
 import { GpuRow } from "../monitor/GpuRow";
@@ -22,24 +22,24 @@ function queryRecording(path: string, from: number, to: number, width: number, f
 
 export interface HistoryBlockProps {
   info: RecordingInfo;
-  // from 與 to 為所有分組共用的顯示範圍 (Unix 微秒).
+  // from 與 to 為顯示範圍 (Unix 微秒).
   from: number;
   to: number;
   curves: Curve[];
   collapsedGPUs: number[] | undefined;
   procsCollapsed: boolean;
-  // pinned 為歷史畫面共用的固定時刻 (Unix 微秒), null 為未固定. onPin 於點選曲線圖時
+  // pinned 為歷史畫面的固定時刻 (Unix 微秒), null 為未固定. onPin 於點選曲線圖時
   // 回報該處的時刻.
   pinned: number | null;
   onPin: (t: number) => void;
-  // edge 為曲線圖的橫向捲動介面, 所有分組共用. onZoom 回報曲線圖上的滾輪與捏合縮放.
+  // edge 為曲線圖的橫向捲動介面. onZoom 回報曲線圖上的滾輪與捏合縮放.
   edge: ChartEdge;
   onZoom: (factor: number, at: number) => void;
 }
 
-// HistoryBlock 為歷史畫面中一個記錄檔的分組: 一行分組標題, 其下為每張 GPU 的卡片與
-// 程序卡片. 文字讀數與程序卡片顯示滑鼠在本分組曲線圖上所指的時刻; 滑鼠不在曲線圖
-// 上時, 有固定時刻則顯示固定時刻, 否則顯示顯示範圍右緣的時刻.
+// HistoryBlock 為歷史畫面中記錄檔的內容: 每張 GPU 的卡片與程序卡片. 文字讀數與程序
+// 卡片顯示滑鼠在曲線圖上所指的時刻; 滑鼠不在曲線圖上時, 有固定時刻則顯示固定時刻,
+// 否則顯示顯示範圍右緣的時刻.
 export const HistoryBlock = memo(function HistoryBlock({
   info,
   from,
@@ -119,13 +119,7 @@ export const HistoryBlock = memo(function HistoryBlock({
   const procs = useProcessesAt(info.path, readAt);
 
   return (
-    <div className="history-group">
-      <header className="history-group-head">
-        <span className="history-group-title">{info.devices?.hostname || info.host}</span>
-        <span className="history-group-detail">{info.host}</span>
-        <span className="flex1" />
-        <span className="history-group-detail">{formatDateRange(info.start, info.end)}</span>
-      </header>
+    <>
       {gpus.length === 0 && <div className="card card-note">{t("history.noGpu")}</div>}
       {gpus.map((g) => (
         <GpuRow
@@ -162,6 +156,6 @@ export const HistoryBlock = memo(function HistoryBlock({
           onToggle={onToggleProcs}
         />
       )}
-    </div>
+    </>
   );
 });

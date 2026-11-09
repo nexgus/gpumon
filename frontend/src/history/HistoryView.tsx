@@ -4,7 +4,7 @@ import { serviceError } from "../api/errors";
 import type { RecordingInfo } from "../api/types";
 import type { ChartEdge } from "../chart/Chart";
 import { ArrowLeftIcon } from "../components/Icons";
-import { formatClock, formatDateTime } from "../format";
+import { formatClock, formatDateRange, formatDateTime } from "../format";
 import { useT } from "../i18n";
 import { ZoomControls } from "../monitor/controls";
 import {
@@ -30,34 +30,26 @@ const edgeSpeed = 0.1;
 const flingTau = 0.2;
 const flingStopSpeed = 20;
 
-type Loaded = { path: string; info: RecordingInfo } | { path: string; error: string };
+type Loaded = { info: RecordingInfo } | { error: string };
 
-// useInfos 讀取開啟中記錄檔的說明, 結果依 paths 的順序排列. 連線中的記錄檔只讀取開啟
-// 當下已存檔的內容, 之後不再更新.
-function useInfos(paths: string[]): Loaded[] | null {
-  const [loaded, setLoaded] = useState<Loaded[] | null>(null);
-  const key = paths.join("\n");
+// useInfo 讀取開啟中記錄檔的說明. 連線中的記錄檔只讀取開啟當下已存檔的內容, 之後不再
+// 更新.
+function useInfo(path: string | null): Loaded | null {
+  const [loaded, setLoaded] = useState<Loaded | null>(null);
   useEffect(() => {
+    if (path === null) {
+      return;
+    }
     let alive = true;
     setLoaded(null);
-    Promise.all(
-      paths.map(async (path): Promise<Loaded> => {
-        try {
-          return { path, info: await backend.recordingInfo(path) };
-        } catch (err) {
-          return { path, error: serviceError(err).message };
-        }
-      }),
-    ).then((l) => {
-      if (alive) {
-        setLoaded(l);
-      }
-    });
+    backend.recordingInfo(path).then(
+      (info) => alive && setLoaded({ info }),
+      (err) => alive && setLoaded({ error: serviceError(err).message }),
+    );
     return () => {
       alive = false;
     };
-    // paths 以 key 代表其內容.
-  }, [key]);
+  }, [path]);
   return loaded;
 }
 
@@ -65,12 +57,11 @@ function baseName(path: string): string {
   return path.split(/[\\/]/).pop() ?? path;
 }
 
-// HistoryView 為歷史畫面: 頂端為工具列, 其下為每個記錄檔一個的分組. 時間捲動由曲線圖
-// 邊緣自動捲動與橫向滾動達成.
-// 所有分組共用同一個顯示範圍, 捲動範圍為所開啟檔案中最早的開始時刻到最晚的結束時刻.
+// HistoryView 為歷史畫面: 頂端為工具列, 其下為開啟中記錄檔的 GPU 卡片與程序卡片.
+// 時間捲動由曲線圖邊緣自動捲動與橫向滾動達成. 捲動範圍為該記錄檔的開始時刻到結束時刻.
 export function HistoryView() {
   const t = useT();
-  const paths = useStore(historyStore, (h) => h.paths);
+  const path = useStore(historyStore, (h) => h.path);
   const storedLeft = useStore(historyStore, (h) => h.left);
   const spanMS = useStore(settingsStore, (s) => s?.history_span_ms) ?? defaultSpanMS;
   const allSetting = useStore(settingsStore, (s) => s?.history_all) ?? false;
@@ -79,10 +70,7 @@ export function HistoryView() {
   const collapsed = useStore(settingsStore, (s) => s?.collapsed_gpus);
   const collapsedProcs = useStore(settingsStore, (s) => s?.collapsed_procs);
   const pinned = useStore(historyStore, (h) => h.pinned);
-  const loaded = useInfos(paths);
-
-  // 離開歷史畫面時清除固定時刻.
-  useEffect(() => () => setHistoryPinned(null), []);
+  const loaded = useInfo(path);
 
   // 有固定時刻且畫面上沒有對話框時, Esc 清除固定時刻. 以擷取階段監聽, 使對話框自己的
   // Esc 處理先關閉對話框之前即可判斷.
@@ -119,9 +107,9 @@ export function HistoryView() {
     };
   }, [stopFling]);
 
-  const infos = useMemo(() => (loaded ?? []).flatMap((l) => ("info" in l ? [l.info] : [])), [loaded]);
-  const min = infos.length > 0 ? Math.min(...infos.map((i) => i.start)) : 0;
-  const max = infos.length > 0 ? Math.max(...infos.map((i) => i.end)) : 0;
+  const info = loaded && "info" in loaded ? loaded.info : null;
+  const min = info?.start ?? 0;
+  const max = info?.end ?? 0;
   // 顯示範圍的長度最短 1 分鐘, 最長為捲動範圍的長度; 捲動範圍短於 1 分鐘時即為捲動範圍
   // 的長度. 處於顯示全部狀態, 或記住的長度不短於捲動範圍時, 顯示範圍涵蓋整個捲動範圍.
   const total = Math.max(minSpan, max - min);
@@ -133,7 +121,7 @@ export function HistoryView() {
   const left = all ? min : Math.min(maxLeft, Math.max(min, storedLeft ?? maxLeft));
   const to = left + span;
 
-  const scrollable = infos.length > 0 && maxLeft > min && !all;
+  const scrollable = info !== null && maxLeft > min && !all;
 
   // 捲動與縮放所需的最新值. 滾輪與自動捲動可能在重新繪製之間連續觸發, 位置與長度以此為準.
   const view = useRef({ left, span, min, max, total, minLen, maxLeft, scrollable });
@@ -255,8 +243,27 @@ export function HistoryView() {
     setHistorySpan(total / 1000, true, minMS);
   };
 
-  const sameDay = formatDateTime(min).slice(0, 10) === formatDateTime(max).slice(0, 10);
+  const sameDay = info !== null && formatDateTime(min).slice(0, 10) === formatDateTime(max).slice(0, 10);
   const edgeText = (us: number) => (sameDay ? formatClock(us) : formatDateTime(us));
+
+  // 標題為記錄檔的主機名稱, user@addr 與起訖時刻; 讀取完成之前為 "History", 讀取失敗時為檔名.
+  let titleText = t("history.title");
+  let titleNode = <span className="toolbar-title">{titleText}</span>;
+  if (info) {
+    const host = info.devices?.hostname || info.host;
+    const range = formatDateRange(info.start, info.end);
+    titleText = `${host} ${info.host} ${range}`;
+    titleNode = (
+      <>
+        <span className="toolbar-title">{host}</span>
+        <span className="history-title-detail">{info.host}</span>
+        <span className="history-title-detail">{range}</span>
+      </>
+    );
+  } else if (loaded && path !== null) {
+    titleText = baseName(path);
+    titleNode = <span className="toolbar-title">{titleText}</span>;
+  }
 
   return (
     <main className="main">
@@ -265,23 +272,26 @@ export function HistoryView() {
           <ArrowLeftIcon />
           {t("history.back")}
         </button>
-        <span className="toolbar-title">{t("history.title")}</span>
-        {pinned !== null && (
-          <span className="pin-tag">
-            {t("history.pinned", { time: edgeText(pinned) })}
-            <button
-              type="button"
-              className="pin-tag-clear"
-              aria-label={t("history.clearPin")}
-              title={t("history.clearPin")}
-              onClick={() => setHistoryPinned(null)}
-            >
-              ✕
-            </button>
+        <span className="history-head">
+          <span className="history-title" title={titleText}>
+            {titleNode}
           </span>
-        )}
-        <span className="flex1" />
-        {infos.length > 0 && (
+          {pinned !== null && (
+            <span className="pin-tag">
+              {t("history.pinned", { time: edgeText(pinned) })}
+              <button
+                type="button"
+                className="pin-tag-clear"
+                aria-label={t("history.clearPin")}
+                title={t("history.clearPin")}
+                onClick={() => setHistoryPinned(null)}
+              >
+                ✕
+              </button>
+            </span>
+          )}
+        </span>
+        {info && (
           <>
             <ZoomControls span={span} min={minLen} max={total} outDisabled={all} onZoom={onButtonZoom} />
             <button type="button" className="btn" aria-pressed={all} onClick={showAll}>
@@ -290,33 +300,26 @@ export function HistoryView() {
           </>
         )}
       </div>
-      <div className="content history-content">
+      <div className="content">
         {loaded === null && <div className="empty-note">{t("history.loading")}</div>}
-        {loaded?.map((l) =>
-          "info" in l ? (
-            <HistoryBlock
-              key={l.path}
-              info={l.info}
-              from={left}
-              to={to}
-              curves={curves}
-              collapsedGPUs={collapsed?.[l.info.host]}
-              procsCollapsed={collapsedProcs?.includes(l.info.host) ?? false}
-              pinned={pinned}
-              onPin={setHistoryPinned}
-              edge={edge}
-              onZoom={zoom}
-            />
-          ) : (
-            <div key={l.path} className="history-group">
-              <header className="history-group-head">
-                <span className="history-group-title">{baseName(l.path)}</span>
-              </header>
-              <div className="card card-note">
-                {t("history.readFailed")} {l.error}
-              </div>
-            </div>
-          ),
+        {loaded && "error" in loaded && (
+          <div className="card card-note">
+            {t("history.readFailed")} {loaded.error}
+          </div>
+        )}
+        {info && (
+          <HistoryBlock
+            info={info}
+            from={left}
+            to={to}
+            curves={curves}
+            collapsedGPUs={collapsed?.[info.host]}
+            procsCollapsed={collapsedProcs?.includes(info.host) ?? false}
+            pinned={pinned}
+            onPin={setHistoryPinned}
+            edge={edge}
+            onZoom={zoom}
+          />
         )}
       </div>
     </main>
