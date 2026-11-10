@@ -857,6 +857,61 @@ button:disabled {
   text-wrap: pretty;
 }
 
+.del-list {
+  max-height: 205px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.del-host {
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.del-list > div:not(:first-child) > .del-host {
+  border-top: 1px solid var(--border);
+}
+
+.del-files {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.del-file {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 26px;
+  padding: 0 10px;
+  border-top: 1px solid var(--border);
+}
+
+.del-range {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.del-range.wrap {
+  overflow-wrap: anywhere;
+}
+
+.del-size {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
 .dialog-buttons {
   display: flex;
   justify-content: flex-end;
