@@ -468,16 +468,17 @@ button:disabled {
   min-width: 0;
 }
 
-/* GPU 卡片. */
+/* GPU 卡片. 標題列橫跨整張卡片, 其下左欄為讀數, 右欄為曲線圖; 曲線圖永遠位於讀數
+   右側, 寬度隨卡片變化. */
 .gpu-card {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 288px minmax(0, 1fr);
   gap: 8px 16px;
   padding: 10px 14px;
 }
 
 .gpu-head {
-  flex: 0 0 100%;
+  grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -486,7 +487,6 @@ button:disabled {
 }
 
 .gpu-readouts {
-  flex: 0 0 288px;
   display: flex;
   flex-direction: column;
   gap: 7px;
@@ -494,7 +494,6 @@ button:disabled {
 }
 
 .gpu-chart {
-  flex: 1 1 420px;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -1366,9 +1365,9 @@ button:disabled {
   overflow: hidden;
 }
 
+/* 選項永遠位於標題與說明的右側, 不折行; 主視窗的最小寬度保證說明文字仍有足夠寬度. */
 .settings-row {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 8px 16px;
   padding: 14px 16px;
@@ -1386,6 +1385,7 @@ button:disabled {
 
 .settings-text {
   flex: 1 1 220px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;

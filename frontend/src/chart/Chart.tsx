@@ -89,7 +89,12 @@ export interface ChartEdge {
   onFling: (vx: number, width: number) => void;
 }
 
+// 時間軸的刻度數上限; 曲線圖較窄時減少, 使刻度文字不重疊, 至少保留兩端.
 const TICKS = 6;
+// TICK_TEXT 為一個 HH:MM:SS 刻度文字的寬度, TICK_GAP 為相鄰刻度文字之間的最小間距,
+// 單位皆為像素.
+const TICK_TEXT = 48;
+const TICK_GAP = 16;
 const EDGE_ZONE = 24;
 const EDGE_DWELL_MS = 300;
 // 按下後移動超過此距離 (像素) 才視為拖曳.
@@ -293,12 +298,14 @@ function nearestIndex(d: ChartData, series: ChartSeries[], t: number, maxDist: n
   return bestDist <= maxDist ? best : -1;
 }
 
-function ticks(from: number, to: number): string[] {
+// ticks 回傳時間軸的刻度文字, 依繪圖區寬度 width 決定刻度數, 兩端分別為 from 與 to.
+function ticks(from: number, to: number, width: number): string[] {
   const span = to - from;
   const fmt = span >= 3 * 3600e6 ? formatClockShort : formatClock;
+  const n = Math.min(TICKS, Math.max(2, Math.floor((width + TICK_GAP) / (TICK_TEXT + TICK_GAP))));
   const out: string[] = [];
-  for (let i = 0; i < TICKS; i++) {
-    out.push(fmt(from + (span * i) / (TICKS - 1)));
+  for (let i = 0; i < n; i++) {
+    out.push(fmt(from + (span * i) / (n - 1)));
   }
   return out;
 }
@@ -739,7 +746,7 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHov
         )}
       </div>
       <div className="chart-xaxis">
-        {ticks(from, to).map((s, i) => (
+        {ticks(from, to, width).map((s, i) => (
           <span key={i}>{s}</span>
         ))}
       </div>

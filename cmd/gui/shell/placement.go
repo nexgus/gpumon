@@ -22,6 +22,11 @@ const (
 	minVisibleHeight = 16
 )
 
+// mainMinWidth 為主視窗外框的最小寬度. 設定頁面最寬的一列 (繁體中文的容量單位) 須內容
+// 寬度約 792 才能使選項位於說明的右側而說明不被擠壓; 另預留 Windows 視窗邊框, 以及
+// WKWebView 與 WebView2 字型寬度的差異.
+const mainMinWidth = 840
+
 // overlap 回傳兩矩形重疊部分的寬與高, 不重疊時為 0.
 func overlap(a, b rect) (int, int) {
 	w := min(a.X+a.W, b.X+b.W) - max(a.X, b.X)
@@ -56,9 +61,10 @@ func centerIn(area rect, w, h int) rect {
 
 // placeMainWindow 依記住的大小與位置決定主視窗開啟時的位置與大小. 記住的位置仍在
 // 螢幕範圍內時照原樣還原; 已不在任何螢幕的範圍內時, 改以首次開啟的大小顯示於主螢幕
-// 中央; 尚未記住位置時以記住的大小顯示於主螢幕中央. screens 為空時無從判斷, ok 為
-// false, 由呼叫端交由作業系統決定位置.
+// 中央; 尚未記住位置時以記住的大小顯示於主螢幕中央. 記住的寬度小於 mainMinWidth 時
+// 改為 mainMinWidth. screens 為空時無從判斷, ok 為 false, 由呼叫端交由作業系統決定位置.
 func placeMainWindow(saved settings.Window, screens []screenArea) (r rect, ok bool) {
+	saved.Width = max(saved.Width, mainMinWidth)
 	if len(screens) == 0 {
 		return rect{W: saved.Width, H: saved.Height}, false
 	}

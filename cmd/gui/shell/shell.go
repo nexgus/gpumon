@@ -170,11 +170,12 @@ func (s *Shell) openMain() {
 	saved := s.b.Store().Snapshot().Window
 	r, ok := placeMainWindow(saved, s.screens())
 	opts := application.WebviewWindowOptions{
-		Name:   "main",
-		Title:  appinfo.Name,
-		Width:  r.W,
-		Height: r.H,
-		URL:    "/",
+		Name:     "main",
+		Title:    appinfo.Name,
+		Width:    r.W,
+		Height:   r.H,
+		MinWidth: mainMinWidth,
+		URL:      "/",
 	}
 	if ok {
 		opts.InitialPosition = application.WindowXY
