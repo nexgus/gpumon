@@ -139,7 +139,7 @@ function onHostEvent(st: HostStatus): void {
 }
 
 export function emptyLive(id: string): Live {
-  return { host: id, devices: null, has_sample: false, time: 0, interval_ms: 0, gpus: [], procs: [] };
+  return { host: id, devices: null, conn_start: 0, has_sample: false, time: 0, interval_ms: 0, gpus: [], procs: [] };
 }
 
 // init 讀取設定, 主機清單與即時資料, 並註冊後端事件. 回傳的函數取消註冊.

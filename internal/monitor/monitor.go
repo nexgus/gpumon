@@ -11,15 +11,12 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"gpumon/internal/history"
 	"gpumon/internal/protocol"
-	"gpumon/internal/recording"
 	"gpumon/internal/settings"
 	"gpumon/internal/sshconn"
 )
@@ -373,11 +370,11 @@ func (m *Manager) Live(id string) (Live, error) {
 	return s.liveCopy(), nil
 }
 
-// Query 查詢主機的曲線資料, 條件見 history.Query. 範圍內該主機先前各次連線的記錄檔
-// 一併查詢, 連線中者含尚未存檔的取樣.
+// Query 查詢主機的曲線資料, 條件見 history.Query. 只查詢寫入中的記錄檔 (含尚未存檔的
+// 取樣), 且不早於本次連線第一筆取樣的時刻; 先前各次連線的記錄檔與自動重新連線前的資料
+// 不在結果中. 沒有寫入中的記錄檔時回傳空的結果.
 func (m *Manager) Query(ctx context.Context, id string, q history.Query) (*history.Result, error) {
-	h, ok := m.store.Host(id)
-	if !ok {
+	if _, ok := m.store.Host(id); !ok {
 		return nil, newErr(CodeNotFound, "Host %s not found", id)
 	}
 	if q.Width < 1 || q.Width > history.MaxWidth || q.To < q.From {
@@ -386,52 +383,18 @@ func (m *Manager) Query(ctx context.Context, id string, q history.Query) (*histo
 	m.mu.Lock()
 	s := m.sessions[id]
 	m.mu.Unlock()
-	name := m.displayName(h, s)
-	var rec *recorder
-	if s != nil {
-		if n := s.recordingName(); n != "" {
-			name = n
-		}
-		rec = s.recorderRef()
-	}
-	paths := m.hostFiles(name)
 	var res *history.Result
 	var err error
-	if rec != nil {
-		res, err = rec.query(ctx, paths, q)
+	if s != nil {
+		q.NotBefore = max(q.NotBefore, s.connStartTime())
+		res, err = s.recorderRef().query(ctx, q)
 	} else {
-		res, err = history.QueryRange(ctx, paths, q)
+		res, err = history.QueryRange(ctx, nil, q)
 	}
 	if err != nil {
 		return nil, newErr(CodeFailed, "%v", err)
 	}
 	return res, nil
-}
-
-// hostFiles 列出記錄檔目錄中說明區的主機為 name 的記錄檔. 無法開啟的檔案略過.
-func (m *Manager) hostFiles(name string) []string {
-	dir := recording.HostDir(m.dataDir, name)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
-	var out []string
-	for _, e := range entries {
-		if !e.Type().IsRegular() || filepath.Ext(e.Name()) != ".gpurec" {
-			continue
-		}
-		p := filepath.Join(dir, e.Name())
-		f, err := recording.Open(p)
-		if err != nil {
-			continue
-		}
-		host := f.Header().Host
-		f.Close()
-		if nameKey(host) == nameKey(name) {
-			out = append(out, p)
-		}
-	}
-	return out
 }
 
 // ActiveRecordings 回傳寫入中的記錄檔路徑, 這些檔案不可刪除.

@@ -48,7 +48,7 @@ export const HostBlock = memo(function HostBlock(p: HostBlockProps) {
   const collapsedGPUs = p.collapsedGPUs ?? noGPUs;
   const anyExpanded = gpus.some((g) => !collapsedGPUs.includes(g.id));
   const fields = useMemo(() => fieldsFor(p.curves), [p.curves]);
-  const result = useLiveCurves(host.id, showsCards && anyExpanded && p.to > 0, p.to, p.span, chartWidth, fields);
+  const result = useLiveCurves(host.id, showsCards && anyExpanded && p.to > 0, live.conn_start, p.to, p.span, chartWidth, fields);
 
   const data = useMemo(() => (result ? toChartData(result, t) : null), [result, t]);
   const seriesByGPU = useMemo(() => {

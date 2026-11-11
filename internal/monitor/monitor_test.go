@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -904,7 +905,7 @@ func TestQueryIncludesUnsavedSamples(t *testing.T) {
 		}
 	}
 
-	// 先前各次連線的記錄一併查詢, 兩次連線之間為未連線.
+	// 手動重新連線後只查詢本次連線, 先前連線的記錄檔不在結果中.
 	e.m.Disconnect(id)
 	e.clock.set(t0 + 40_000_000)
 	e.m.Connect(id)
@@ -916,11 +917,98 @@ func TestQueryIncludesUnsavedSamples(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Samples != 12 || len(res.GPUs) != 2 {
-		t.Fatalf("%d samples across connections", res.Samples)
+	if res.Samples != 1 || len(res.GPUs) != 2 || len(res.Gaps) != 0 || res.Times[0] != t0+40_000_000 {
+		t.Fatalf("query after a manual reconnection: %d samples, %d gaps, times %v", res.Samples, len(res.Gaps), res.Times)
 	}
-	if g := res.Gaps[len(res.Gaps)-1]; g.Reason != history.GapNotConnected {
-		t.Fatalf("gap between connections %+v", g)
+	if lv, _ := e.m.Live(id); lv.ConnStart != t0+40_000_000 {
+		t.Fatalf("conn start %d", lv.ConnStart)
+	}
+}
+
+func TestQueryAfterAutoReconnect(t *testing.T) {
+	e := newEnv(t, testTiming())
+	id := e.addHost("alice", "gpu01")
+	ls := newLinks()
+	ok := okDialer(ls, "alice", nvidiaDevices(0))
+	var hold atomic.Bool
+	e.dialer.set(func(ctx context.Context, n int, tg Target, a Auth) (Link, error) {
+		if n > 1 && hold.Load() {
+			return nil, connectErr("Cannot connect to gpu01")
+		}
+		return ok(ctx, n, tg, a)
+	})
+	t0 := e.clock.now().UnixMicro()
+	e.m.Connect(id)
+	l := ls.next(t)
+	e.waitState(id, StateConnected)
+	for i := 0; i < 5; i++ {
+		l.send(sampleMsg(1000+float64(i), 10, []int{0}))
+	}
+	e.waitLiveTime(id, t0+4_000_000)
+	if lv, _ := e.m.Live(id); lv.ConnStart != t0 {
+		t.Fatalf("conn start %d, want %d", lv.ConnStart, t0)
+	}
+	ctx := context.Background()
+	q := history.Query{From: t0 - 10_000_000, To: t0 + 60_000_000, Width: 1000, Fields: []history.Field{history.FieldUtil}}
+
+	// 重新連線中且新連線尚無取樣時, 照常回傳斷線前的資料.
+	hold.Store(true)
+	l.die(errors.New("EOF"))
+	e.waitState(id, StateReconnecting)
+	res, err := e.m.Query(ctx, id, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Samples != 5 || res.Times[0] != t0 {
+		t.Fatalf("query while reconnecting: %d samples, times %v", res.Samples, res.Times)
+	}
+
+	// 重新連線成功, 收到第一筆取樣前仍為斷線前的資料.
+	hold.Store(false)
+	l2 := ls.next(t)
+	e.waitState(id, StateConnected)
+	if res, err = e.m.Query(ctx, id, q); err != nil || res.Samples != 5 {
+		t.Fatalf("query before the first sample of the new connection: %+v, %v", res, err)
+	}
+
+	// 收到第一筆取樣後只剩新連線的資料, 斷線的灰底不出現.
+	t1 := t0 + 30_000_000
+	e.clock.set(t1)
+	l2.send(sampleMsg(3000, 70, []int{0}))
+	l2.send(sampleMsg(3000.2, 71, []int{0}))
+	e.waitLiveTime(id, t1+200_000)
+	if lv, _ := e.m.Live(id); lv.ConnStart != t1 {
+		t.Fatalf("conn start %d, want %d", lv.ConnStart, t1)
+	}
+	res, err = e.m.Query(ctx, id, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Samples != 2 || len(res.Gaps) != 0 || res.Times[0] != t1 {
+		t.Fatalf("query after reconnecting: %d samples, gaps %+v, times %v", res.Samples, res.Gaps, res.Times)
+	}
+	if v := res.GPUs[0].Fields[history.FieldUtil].Avg; v[0] != 70 || v[1] != 71 {
+		t.Fatalf("util %v", v)
+	}
+
+	// 記錄檔照舊接續寫入並留有斷線記錄.
+	e.m.recorderRefFor(id).flush()
+	_, recs := readAll(t, e.status(id).Recording)
+	if got, want := kinds(recs), []recording.Kind{kS, kP, kS, kS, kS, kS, kD, kS, kS}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("records %v, want %v", got, want)
+	}
+
+	// 同一次連線內的無資料時段照舊以灰底標示.
+	l2.send(protocol.Error{Type: "error", TS: 3000.3, Msg: "nvml timeout"})
+	e.clock.set(t1 + 20_000_000)
+	l2.send(sampleMsg(3020, 72, []int{0}))
+	e.waitLiveTime(id, t1+20_000_000)
+	res, err = e.m.Query(ctx, id, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Samples != 3 || len(res.Gaps) != 1 || res.Gaps[0].Reason != history.GapError {
+		t.Fatalf("gaps in a single connection %+v", res.Gaps)
 	}
 }
 

@@ -190,17 +190,20 @@ func (r *recorder) path() string {
 	return r.w.Path()
 }
 
-// query 查詢 paths 與寫入中的記錄檔, 並合併尚未存檔的取樣. 查詢期間暫停 flush.
-func (r *recorder) query(ctx context.Context, paths []string, q history.Query) (*history.Result, error) {
+// query 查詢寫入中的記錄檔並合併尚未存檔的取樣; 沒有寫入中的記錄檔時回傳空的結果.
+// 查詢期間暫停 flush. r 為 nil 時視為沒有記錄檔.
+func (r *recorder) query(ctx context.Context, q history.Query) (*history.Result, error) {
+	if r == nil {
+		return history.QueryRange(ctx, nil, q)
+	}
 	r.flushMu.RLock()
 	defer r.flushMu.RUnlock()
 	r.mu.Lock()
+	var paths []string
 	var pending []history.Pending
 	if r.w != nil {
 		cur := r.w.Path()
-		if !slices.Contains(paths, cur) {
-			paths = append(paths, cur)
-		}
+		paths = []string{cur}
 		pending = []history.Pending{{Path: cur, Records: slices.Clone(r.pending)}}
 	}
 	r.mu.Unlock()

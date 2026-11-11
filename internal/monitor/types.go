@@ -162,6 +162,9 @@ type Live struct {
 	Host string `json:"host"`
 	// Devices 為本次連線收到的 devices 訊息; 尚未收到時為 nil.
 	Devices *protocol.Devices `json:"devices"`
+	// ConnStart 為本次連線第一筆取樣的時刻 (Unix 微秒), 監看畫面的曲線自此時刻起繪製;
+	// 本次連線尚未收到取樣時為 0.
+	ConnStart int64 `json:"conn_start"`
 	// HasSample 為假時, 以下欄位無意義.
 	HasSample bool `json:"has_sample"`
 	// Time 為最新一筆取樣的取樣時刻, 依 6.2 的時間基準換算, 單位為 Unix 微秒.

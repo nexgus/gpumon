@@ -1,6 +1,7 @@
 package history
 
 import (
+	"context"
 	"encoding/json"
 	"math"
 	"strings"
@@ -438,5 +439,41 @@ func TestQueryValidation(t *testing.T) {
 	defer cancel()
 	if _, err := QueryRange(ctx, p, Query{From: twall, To: twall + sec, Width: 10}); err == nil {
 		t.Fatal("cancelled context should fail")
+	}
+}
+
+func TestQueryNotBefore(t *testing.T) {
+	dir := t.TempDir()
+	w := newRec(t, dir, "a@b", 0, 0)
+	add(w, 0, 1000, 1, 0)
+	add(w, 1, 1000, 2, 0)
+	w.AddError(ts0+1.5, "nvml timeout")
+	w.AddDisconnect(twall+int64(10e6), "lost")
+	w.BeginConnection(twall+20*sec, ts0+100)
+	add(w, 100, 1000, 3, 0)
+	add(w, 101, 1000, 4, 0)
+	flush(t, w)
+
+	run := func(from, to, notBefore int64) *Result {
+		t.Helper()
+		r, err := QueryRange(context.Background(), []string{w.Path()}, Query{From: from, To: to, Width: 100, Fields: []Field{FieldUtil}, NotBefore: notBefore})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	all := run(twall, twall+30*sec, 0)
+	if all.Samples != 4 || len(all.Gaps) != 1 {
+		t.Fatalf("without a floor: %d samples, gaps %+v", all.Samples, all.Gaps)
+	}
+	for _, from := range []int64{twall - 5*sec, twall + 20*sec, twall + 20*sec + 1} {
+		r := run(from, twall+30*sec, twall+20*sec)
+		wantSamples := 2
+		if from > twall+20*sec {
+			wantSamples = 1
+		}
+		if r.Samples != wantSamples || len(r.Gaps) != 0 || r.From != from {
+			t.Fatalf("from %d: %d samples, gaps %+v", from, r.Samples, r.Gaps)
+		}
 	}
 }

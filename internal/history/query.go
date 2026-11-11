@@ -38,6 +38,9 @@ type Query struct {
 	// Stats 為真時, 降採樣的結果另附各像素範圍的取樣筆數與各曲線的總和及筆數, 供呼叫端
 	// 把之後的取樣併入同一組像素範圍.
 	Stats bool
+	// NotBefore 不為 0 時, 時刻早於它的記錄一律視為不存在, 不計入曲線, 也不參與無資料時段
+	// 的判定. 像素範圍仍依 From 與 To 劃分.
+	NotBefore int64
 }
 
 type queryFile struct {
@@ -249,7 +252,7 @@ func (e *engine) runFile(ctx context.Context, qf *queryFile) error {
 	if err != nil {
 		return err
 	}
-	lo, err := qf.f.LowerBound(e.q.From)
+	lo, err := qf.f.LowerBound(max(e.q.From, e.q.NotBefore))
 	if err != nil {
 		return err
 	}
@@ -259,7 +262,7 @@ func (e *engine) runFile(ctx context.Context, qf *queryFile) error {
 			return err
 		}
 	}
-	if lo > 0 {
+	if lo > 0 && e.q.From > e.q.NotBefore {
 		if err := e.scanBack(ctx, qf, lo); err != nil {
 			return err
 		}
@@ -319,6 +322,9 @@ func (e *engine) scanBack(ctx context.Context, qf *queryFile, lo int) error {
 }
 
 func (e *engine) handle(rec *recording.Record) {
+	if rec.Time < e.q.NotBefore {
+		return
+	}
 	switch rec.Kind {
 	case recording.KindError:
 		if e.hasPrev && !e.hasErr {

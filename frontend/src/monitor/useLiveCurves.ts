@@ -5,15 +5,17 @@ import { fromResult, gridFor, gridRange, merge, tailRange, tailWidth, toResult, 
 
 interface Params {
   id: string;
+  connStart: number;
   to: number;
   span: number;
   width: number;
   fields: Field[];
 }
 
-// viewKey 為決定像素範圍與欄位的參數; 只有 to 改變時以增量更新.
+// viewKey 為決定像素範圍, 欄位與連線起點的參數; 只有 to 改變時以增量更新. 連線起點改變
+// 表示自動重新連線後另一次連線開始, 增量狀態內的舊曲線須丟棄.
 function viewKey(p: Params): string {
-  return `${p.id}|${p.span}|${p.width}|${p.fields.join(",")}`;
+  return `${p.id}|${p.connStart}|${p.span}|${p.width}|${p.fields.join(",")}`;
 }
 
 // useLiveCurves 查詢監看畫面主機於顯示範圍 [to - span, to] 的曲線資料. 像素範圍對齊絕對
@@ -21,10 +23,12 @@ function viewKey(p: Params): string {
 // 寬度或欄位改變時重新查詢整段; 只有右緣 to 前進時, 降採樣的結果只查詢新取樣並併入,
 // 每筆取樣的更新成本與顯示範圍長度無關; 結果為原始取樣點時, 取樣筆數不多於曲線圖寬度,
 // 直接重新查詢. 同一時間只有一個查詢進行中, 進行中又有新參數時, 於完成後以最新的參數
-// 再查一次. enabled 為假或 width 為 0 時不查詢.
+// 再查一次. connStart 為本次連線第一筆取樣的時刻, 改變時重新查詢整段. enabled 為假或
+// width 為 0 時不查詢.
 export function useLiveCurves(
   id: string,
   enabled: boolean,
+  connStart: number,
   to: number,
   span: number,
   width: number,
@@ -58,7 +62,7 @@ export function useLiveCurves(
     if (!enabled || width <= 0 || to <= 0 || span <= 0 || fields.length === 0) {
       return;
     }
-    wanted.current = { id, to, span, width, fields };
+    wanted.current = { id, connStart, to, span, width, fields };
 
     const full = async (p: Params, key: string) => {
       const grid = gridFor(p.to, p.span, p.width);
@@ -116,7 +120,7 @@ export function useLiveCurves(
     };
     run();
     // fields 以 fieldsKey 代表其內容, 不列入相依.
-  }, [id, enabled, to, span, width, fieldsKey]);
+  }, [id, enabled, connStart, to, span, width, fieldsKey]);
 
   return result;
 }

@@ -108,6 +108,8 @@ export interface LiveProcess {
 export interface Live {
   host: string;
   devices: Devices | null;
+  // conn_start 為本次連線第一筆取樣的時刻; 本次連線尚未收到取樣時為 0.
+  conn_start: number;
   has_sample: boolean;
   time: number;
   interval_ms: number;

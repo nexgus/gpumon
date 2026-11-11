@@ -34,12 +34,15 @@ type session struct {
 	retries  int
 	retryErr string
 	user     string
-	recName  string
 	rec      *recorder
 	live     Live
 	cmds     chan protocol.Command
 	cancel   context.CancelFunc
 	done     chan struct{}
+
+	// connStart 為本次連線第一筆取樣的時刻 (記錄檔所用的時刻); 尚未收到取樣時沿用
+	// 前一次連線的值, 使用者按下連線時歸零.
+	connStart int64
 
 	// 密碼與解密後的金鑰. password 為暫留供自動重新連線的登入密碼, candidate 為
 	// 正在連線時使用者輸入, 尚未確定認證成功的登入密碼.
@@ -65,15 +68,6 @@ func (s *session) lastUser() string {
 	return s.user
 }
 
-func (s *session) recordingName() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.st == StateDisconnected {
-		return ""
-	}
-	return s.recName
-}
-
 func (s *session) recorderRef() *recorder {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -95,6 +89,12 @@ func (s *session) fill(st *HostStatus) {
 	if rec != nil {
 		st.Recording = rec.path()
 	}
+}
+
+func (s *session) connStartTime() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.connStart
 }
 
 func (s *session) liveCopy() Live {
@@ -127,6 +127,7 @@ func (s *session) start() {
 	s.done = make(chan struct{})
 	s.rec = newRecorder(s.m.dataDir, s.m.timing.ProcessRecord.Microseconds(), s.m.log)
 	s.live = Live{Host: s.id}
+	s.connStart = 0
 	done := s.done
 	s.mu.Unlock()
 	s.secMu.Lock()
@@ -564,7 +565,7 @@ func (s *session) serve(ctx context.Context, c *conn, disc *disconnect) string {
 	}
 	s.mu.Lock()
 	s.st, s.reason, s.retries, s.retryErr = StateConnected, "", 0, ""
-	s.user, s.recName = user, name
+	s.user = user
 	s.cmds = cmds
 	s.live = Live{Host: s.id, Devices: &c.devices}
 	s.mu.Unlock()
@@ -637,6 +638,7 @@ type handler struct {
 	interval int
 	util     *utilTracker
 	started  bool
+	connTime int64
 	tBase    int64
 	tsBase   float64
 }
@@ -745,9 +747,13 @@ func (h *handler) sample(smp *protocol.Sample, raw *rawSample) {
 	if procs == nil {
 		procs = []LiveProcess{}
 	}
+	if h.connTime == 0 {
+		h.connTime = t
+	}
 	h.s.mu.Lock()
-	lv := Live{Host: h.s.id, Devices: &h.c.devices, HasSample: true, Time: t, IntervalMS: h.interval, GPUs: live, Procs: procs}
+	lv := Live{Host: h.s.id, Devices: &h.c.devices, ConnStart: h.connTime, HasSample: true, Time: t, IntervalMS: h.interval, GPUs: live, Procs: procs}
 	h.s.live = lv
+	h.s.connStart = h.connTime
 	h.s.mu.Unlock()
 	h.s.m.notify.Notify(EventSample, lv)
 }

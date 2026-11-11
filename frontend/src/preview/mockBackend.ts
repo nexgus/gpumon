@@ -269,6 +269,9 @@ function sampleTimes(h: MockHost, from: number, to: number): number[] {
   return out;
 }
 
+// mockConnStart 為預覽頁假設的連線起點; 預覽頁的曲線為合成資料, 不隨連線起點截斷.
+const mockConnStart = Math.floor(now() / step) * step;
+
 function makeLive(h: MockHost): Live {
   const t = lastTime(h);
   const gpus: LiveGPU[] = (h.devices?.gpus ?? []).map((g) => ({
@@ -303,6 +306,7 @@ function makeLive(h: MockHost): Live {
   return {
     host: h.status.id,
     devices: h.devices,
+    conn_start: showsData ? mockConnStart : 0,
     has_sample: showsData && !!h.devices,
     time: t,
     interval_ms: intervalMS,
