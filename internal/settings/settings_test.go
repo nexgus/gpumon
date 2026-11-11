@@ -33,6 +33,9 @@ func TestDefaults(t *testing.T) {
 	if d.Appearance != AppearanceSystem || d.Language != LanguageEnglish {
 		t.Errorf("appearance/language = %v/%v", d.Appearance, d.Language)
 	}
+	if d.SizeUnits != SizeUnitsBinary {
+		t.Errorf("size units = %v", d.SizeUnits)
+	}
 	if d.MonitorSpanMS != 300000 || d.HistorySpanMS != 300000 || d.HistoryAll {
 		t.Errorf("spans = %d %d %v", d.MonitorSpanMS, d.HistorySpanMS, d.HistoryAll)
 	}
@@ -61,6 +64,7 @@ func TestRoundTrip(t *testing.T) {
 	must(s.SetWindow(Window{Width: 1000, Height: 700, HasPosition: true, X: -50, Y: 20}))
 	must(s.SetAppearance(AppearanceDark))
 	must(s.SetLanguage(LanguageTraditionalChinese))
+	must(s.SetSizeUnits(SizeUnitsDecimal))
 	must(s.SetMonitorSpan(MaxMonitorSpanMS))
 	must(s.SetHistorySpan(7_654_321, true))
 	must(s.SetCurves([]Curve{CurveTemp, CurveUtil, CurveClockMem}))
@@ -82,6 +86,9 @@ func TestRoundTrip(t *testing.T) {
 	}
 	if _, ok := s2.Snapshot().CollapsedGPUs["gpu02"]; ok {
 		t.Errorf("empty collapsed entry should be removed")
+	}
+	if s2.Snapshot().SizeUnits != SizeUnitsDecimal {
+		t.Errorf("size units = %v", s2.Snapshot().SizeUnits)
 	}
 	h, _ := s2.Host("alice@10.0.0.5")
 	if d := s2.Snapshot(); d.MonitorSpanMS != MaxMonitorSpanMS || d.HistorySpanMS != 7_654_321 || !d.HistoryAll {
@@ -238,6 +245,9 @@ func TestSetterRanges(t *testing.T) {
 	if err := s.SetLanguage("fr"); err == nil {
 		t.Error("bad language accepted")
 	}
+	if err := s.SetSizeUnits("si"); err == nil {
+		t.Error("bad size units accepted")
+	}
 	if err := s.SetCurves([]Curve{CurveUtil, CurveUtil}); err == nil {
 		t.Error("duplicate curve accepted")
 	}
@@ -278,7 +288,7 @@ func TestLoadOutOfRangeAndInvalid(t *testing.T) {
 	writeFile(t, dir, `{
 	  "version": 1,
 	  "window": {"width": -3, "height": 99999999, "has_position": true, "x": 5000000, "y": 1},
-	  "appearance": "neon", "language": "xx",
+	  "appearance": "neon", "language": "xx", "size_units": "si",
 	  "monitor_range": "all", "history_range": "7m",
 	  "curves": ["util", "bogus", "util", "power"],
 	  "hosts": [
@@ -300,8 +310,8 @@ func TestLoadOutOfRangeAndInvalid(t *testing.T) {
 	if d.Window.HasPosition {
 		t.Errorf("out-of-range position should be dropped: %+v", d.Window)
 	}
-	if d.Appearance != AppearanceSystem || d.Language != LanguageEnglish {
-		t.Errorf("enums not defaulted: %v %v", d.Appearance, d.Language)
+	if d.Appearance != AppearanceSystem || d.Language != LanguageEnglish || d.SizeUnits != SizeUnitsBinary {
+		t.Errorf("enums not defaulted: %v %v %v", d.Appearance, d.Language, d.SizeUnits)
 	}
 	if d.MonitorSpanMS != DefaultSpanMS || d.HistorySpanMS != DefaultSpanMS || d.HistoryAll {
 		t.Errorf("invalid legacy ranges must give defaults: %d %d %v", d.MonitorSpanMS, d.HistorySpanMS, d.HistoryAll)
@@ -403,7 +413,7 @@ func TestLoadLegacyRanges(t *testing.T) {
 
 func TestLoadPartialAndWrongTypes(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, `{"language":"zh-TW","appearance":5,"hosts":"nope","curves":[]}`)
+	writeFile(t, dir, `{"language":"zh-TW","appearance":5,"size_units":3,"hosts":"nope","curves":[]}`)
 	s, err := Open(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -412,7 +422,7 @@ func TestLoadPartialAndWrongTypes(t *testing.T) {
 	if d.Language != LanguageTraditionalChinese {
 		t.Errorf("valid member lost: %v", d.Language)
 	}
-	if d.Appearance != AppearanceSystem || len(d.Hosts) != 0 {
+	if d.Appearance != AppearanceSystem || d.SizeUnits != SizeUnitsBinary || len(d.Hosts) != 0 {
 		t.Errorf("wrong-typed members should fall back: %+v", d)
 	}
 	if d.Curves == nil || len(d.Curves) != 0 {

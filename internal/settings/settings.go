@@ -54,6 +54,16 @@ const (
 	LanguageTraditionalChinese Language = "zh-TW"
 )
 
+// SizeUnits 為容量的顯示單位制.
+type SizeUnits string
+
+// 容量單位制的可用值. 二進位以 1024 進位, 單位為 KiB, MiB, GiB; 十進位以 1000
+// 進位, 單位為 kB, MB, GB.
+const (
+	SizeUnitsBinary  SizeUnits = "binary"
+	SizeUnitsDecimal SizeUnits = "decimal"
+)
+
 // Curve 為曲線圖可選的曲線.
 type Curve string
 
@@ -173,6 +183,10 @@ func validLanguage(v Language) bool {
 	return v == LanguageEnglish || v == LanguageTraditionalChinese
 }
 
+func validSizeUnits(v SizeUnits) bool {
+	return v == SizeUnitsBinary || v == SizeUnitsDecimal
+}
+
 func validCurve(v Curve) bool {
 	for _, c := range AllCurves() {
 		if c == v {
@@ -230,6 +244,8 @@ type Data struct {
 	Window     Window     `json:"window"`
 	Appearance Appearance `json:"appearance"`
 	Language   Language   `json:"language"`
+	// SizeUnits 為記憶體與檔案大小的顯示單位制.
+	SizeUnits SizeUnits `json:"size_units"`
 
 	// MonitorSpanMS 為監看畫面的顯示範圍長度, 所有主機共用, 單位為毫秒.
 	MonitorSpanMS int64 `json:"monitor_span_ms"`
@@ -263,6 +279,7 @@ func Default() Data {
 		Window:         Window{Width: DefaultWindowWidth, Height: DefaultWindowHeight},
 		Appearance:     AppearanceSystem,
 		Language:       LanguageEnglish,
+		SizeUnits:      SizeUnitsBinary,
 		MonitorSpanMS:  DefaultSpanMS,
 		HistorySpanMS:  DefaultSpanMS,
 		Curves:         DefaultCurves(),
@@ -327,6 +344,9 @@ func (d *Data) sanitize() {
 	}
 	if !validLanguage(d.Language) {
 		d.Language = def.Language
+	}
+	if !validSizeUnits(d.SizeUnits) {
+		d.SizeUnits = def.SizeUnits
 	}
 	d.MonitorSpanMS = clampInt(d.MonitorSpanMS, MinSpanMS, MaxMonitorSpanMS)
 	d.HistorySpanMS = max(d.HistorySpanMS, MinSpanMS)

@@ -1,20 +1,23 @@
 import { useId } from "react";
-import type { Appearance, Curve, Language } from "../api/types";
+import type { Appearance, Curve, Language, SizeUnits } from "../api/types";
 import { allCurves, curveColor } from "../chart/gpuSeries";
 import { useT } from "../i18n";
-import { choicesStore, defaultCurves, setAppearance, setCurves, setLanguage, settingsStore } from "../state/app";
+import { choicesStore, defaultCurves, setAppearance, setCurves, setLanguage, setSizeUnits, settingsStore, useSizeUnits } from "../state/app";
 import { useStore } from "../state/store";
 
 const appearances: Appearance[] = ["system", "light", "dark"];
 const languages: Language[] = ["en", "zh-TW"];
+const sizeUnitsList: SizeUnits[] = ["binary", "decimal"];
 
-// SettingsPage 為設定頁面, 含外觀, 語言與曲線三項, 選擇後立即生效並記住.
+// SettingsPage 為設定頁面, 含外觀, 語言, 容量單位與曲線四項, 選擇後立即生效並記住.
 export function SettingsPage() {
   const t = useT();
   const appearance = useStore(settingsStore, (s) => s?.appearance) ?? "system";
   const language = useStore(settingsStore, (s) => s?.language) ?? "en";
+  const sizeUnits = useSizeUnits();
   const labelID = useId();
   const langID = useId();
+  const unitsID = useId();
   const curvesID = useId();
   const curves = useStore(settingsStore, (s) => s?.curves) ?? defaultCurves;
   const maxCurves = useStore(choicesStore, (c) => c?.max_curves) ?? allCurves.length;
@@ -62,6 +65,21 @@ export function SettingsPage() {
                 </option>
               ))}
             </select>
+          </div>
+          <div className="settings-row">
+            <div className="settings-text">
+              <div id={unitsID} className="settings-title">
+                {t("settings.sizeUnits")}
+              </div>
+              <div className="settings-hint">{t("settings.sizeUnitsHint")}</div>
+            </div>
+            <div role="group" aria-labelledby={unitsID} className="segmented">
+              {sizeUnitsList.map((u) => (
+                <button key={u} type="button" aria-pressed={sizeUnits === u} onClick={() => void setSizeUnits(u)}>
+                  {t(`sizeUnits.${u}`)}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="settings-row top">
             <div className="settings-text">

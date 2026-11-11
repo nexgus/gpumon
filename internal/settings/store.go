@@ -328,6 +328,14 @@ func (s *Store) SetLanguage(v Language) error {
 	return s.update(func(d *Data) error { d.Language = v; return nil })
 }
 
+// SetSizeUnits 設定容量的顯示單位制.
+func (s *Store) SetSizeUnits(v SizeUnits) error {
+	if !validSizeUnits(v) {
+		return invalid("size units %q", v)
+	}
+	return s.update(func(d *Data) error { d.SizeUnits = v; return nil })
+}
+
 // SetMonitorSpan 設定監看畫面的顯示範圍長度, 所有主機共用, 單位為毫秒,
 // 範圍 MinSpanMS 至 MaxMonitorSpanMS.
 func (s *Store) SetMonitorSpan(ms int64) error {

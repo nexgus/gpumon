@@ -16,12 +16,13 @@ import type {
   Prompt,
   QuitRequest,
   ServiceError,
+  SizeUnits,
   SettingsData,
   UploadNotice,
 } from "../api/types";
 import { setLanguage as applyLanguage } from "../i18n";
 import { setAppearance as applyAppearance } from "../theme";
-import { Store } from "./store";
+import { Store, useStore } from "./store";
 
 export type Page = "monitor" | "recordings" | "history" | "settings";
 
@@ -217,6 +218,25 @@ export async function setLanguage(v: Language): Promise<void> {
     }
     reportOperation("", err);
   }
+}
+
+// setSizeUnits 設定容量單位制, 寫入失敗時還原.
+export async function setSizeUnits(v: SizeUnits): Promise<void> {
+  const old = settingsStore.get()?.size_units;
+  patchSettings({ size_units: v });
+  try {
+    await backend.setSizeUnits(v);
+  } catch (err) {
+    if (old) {
+      patchSettings({ size_units: old });
+    }
+    reportOperation("", err);
+  }
+}
+
+// useSizeUnits 回傳目前的容量單位制; 設定變更時使用它的元件重新繪製.
+export function useSizeUnits(): SizeUnits {
+  return useStore(settingsStore, (s) => s?.size_units) ?? "binary";
 }
 
 async function saveSetting<K extends keyof SettingsData>(

@@ -5,7 +5,7 @@ import type { ChartEdge, ChartGap } from "../chart/Chart";
 import { gpuSeries, toChartData } from "../chart/gpuSeries";
 import { formatClock } from "../format";
 import { useT } from "../i18n";
-import { setGPUCollapsed, setProcessesCollapsed } from "../state/app";
+import { setGPUCollapsed, setProcessesCollapsed, useSizeUnits } from "../state/app";
 import { GpuRow } from "../monitor/GpuRow";
 import { ProcessTable } from "../monitor/ProcessTable";
 import { useCurveFeed } from "../monitor/useCurveFeed";
@@ -53,6 +53,7 @@ export const HistoryBlock = memo(function HistoryBlock({
   onZoom,
 }: HistoryBlockProps) {
   const t = useT();
+  const units = useSizeUnits();
   const gpus = info.devices?.gpus ?? noDevices;
   const collapsed = collapsedGPUs ?? noGPUs;
   const anyExpanded = gpus.some((g) => !collapsed.includes(g.id));
@@ -107,11 +108,11 @@ export const HistoryBlock = memo(function HistoryBlock({
     const m = new Map<number, ReturnType<typeof gpuSeries>>();
     if (result) {
       for (const g of gpus) {
-        m.set(g.id, gpuSeries(result, g.id, g, curves, t));
+        m.set(g.id, gpuSeries(result, g.id, g, curves, units, t));
       }
     }
     return m;
-  }, [result, gpus, curves, t]);
+  }, [result, gpus, curves, units, t]);
 
   const readAt = hover ?? pinned ?? to;
   const readResult = hover === null && pinOutside ? pinResult : result;

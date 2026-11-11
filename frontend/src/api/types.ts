@@ -5,6 +5,7 @@ export type HostState = "disconnected" | "connecting" | "connected" | "reconnect
 
 export type Appearance = "system" | "light" | "dark";
 export type Language = "en" | "zh-TW";
+export type SizeUnits = "binary" | "decimal";
 export type Curve = "util" | "mem" | "temp" | "fan" | "power" | "clock_gpu" | "clock_mem";
 export type Field =
   | "util"
@@ -287,6 +288,8 @@ export interface SettingsData {
   window: WindowSettings;
   appearance: Appearance;
   language: Language;
+  // size_units 為記憶體與檔案大小的單位制, binary 為 1024 進位, decimal 為 1000 進位.
+  size_units: SizeUnits;
   // monitor_span_ms 與 history_span_ms 為監看畫面與歷史畫面的顯示範圍長度 (毫秒);
   // history_all 為歷史畫面是否處於顯示全部狀態.
   monitor_span_ms: number;
@@ -394,6 +397,7 @@ export interface Backend {
   choices(): Promise<Choices>;
   setAppearance(v: Appearance): Promise<void>;
   setLanguage(v: Language): Promise<void>;
+  setSizeUnits(v: SizeUnits): Promise<void>;
   setMonitorSpan(ms: number): Promise<void>;
   setHistorySpan(ms: number, all: boolean): Promise<void>;
   setCurves(curves: Curve[]): Promise<void>;

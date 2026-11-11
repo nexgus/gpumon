@@ -147,7 +147,7 @@
   "delete.title": "刪除 {name}？",
   "delete.text": "此主機將自清單移除，其記錄檔會保留。",
 
-  "unit.kb": "{value} KB",
+  "unit.kb": "{value} kB",
   "unit.mb": "{value} MB",
   "unit.gb": "{value} GB",
   "duration.min": "{m} 分",
@@ -193,10 +193,14 @@
   "settings.appearanceHint": "跟隨系統即依作業系統的外觀設定。",
   "settings.language": "語言",
   "settings.languageHint": "選擇後立即生效。",
+  "settings.sizeUnits": "容量單位",
+  "settings.sizeUnitsHint": "GPU 記憶體與記錄檔大小皆以此單位顯示。GiB 為 ISO/IEC 80000-13 的二進位前綴，GB 為 SI 前綴。",
   "settings.curvesHint": "監看畫面與歷史畫面皆畫出勾選的曲線。",
   "appearance.system": "跟隨系統",
   "appearance.light": "淺色",
   "appearance.dark": "深色",
+  "sizeUnits.binary": "GiB（1024 進位）",
+  "sizeUnits.decimal": "GB（1000 進位）",
   "language.en": "English",
   "language.zh-TW": "繁體中文",
 

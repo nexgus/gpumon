@@ -1,7 +1,7 @@
 // 把曲線查詢的結果換算為曲線圖 (chart/Chart.tsx) 的輸入. 監看畫面與歷史畫面共用.
-import type { Curve, Device, Field, Gap, QueryResult, SeriesData, SeriesValues } from "../api/types";
+import type { Curve, Device, Field, Gap, QueryResult, SeriesData, SeriesValues, SizeUnits } from "../api/types";
 import type { Translator } from "../i18n";
-import { gib } from "../format";
+import { memGiga, memGigaKey } from "../format";
 import type { ChartData, ChartGap, ChartSeries } from "./Chart";
 
 // allCurves 為曲線選單的順序, 亦為圖例與曲線的繪製順序.
@@ -96,6 +96,7 @@ export function gpuSeries(
   gpuID: number,
   device: Device | undefined,
   curves: Curve[],
+  units: SizeUnits,
   t: Translator,
 ): ChartSeries[] {
   const g = res.gpus?.find((x) => x.id === gpuID);
@@ -138,7 +139,7 @@ export function gpuSeries(
             return na;
           }
           return t("value.memPercent", {
-            value: t("unit.gib", { value: gib(v) }),
+            value: t(memGigaKey(units), { value: memGiga(v, units) }),
             percent: t("unit.percent", { value: Math.round((v / total) * 100) }),
           });
         },

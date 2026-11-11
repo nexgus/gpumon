@@ -1,5 +1,6 @@
 // 數值與時刻的格式. 日期與時間的格式不隨語言變動.
-import type { Translator } from "./i18n";
+import type { SizeUnits } from "./api/types";
+import type { MessageKey, Translator } from "./i18n";
 
 function pad(n: number): string {
   return n < 10 ? `0${n}` : String(n);
@@ -23,32 +24,49 @@ export function formatDateTime(us: number): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${formatClock(us)}`;
 }
 
-const GiB = 1024 ** 3;
-const MiB = 1024 ** 2;
-
-// gib 回傳以 GiB 表示的數值字串, 取一位小數.
-export function gib(bytes: number): string {
-  return (bytes / GiB).toFixed(1);
+// base 回傳單位制的進位基數, 二進位為 1024, 十進位為 1000.
+function base(units: SizeUnits): number {
+  return units === "binary" ? 1024 : 1000;
 }
 
-// bytesUnit 依大小選擇 GiB 或 MiB, 回傳數值字串與單位.
-export function bytesUnit(bytes: number): { value: string; unit: "gib" | "mib" } {
-  if (bytes >= GiB) {
-    return { value: gib(bytes), unit: "gib" };
-  }
-  return { value: String(Math.round(bytes / MiB)), unit: "mib" };
+type SizeStep = "kilo" | "mega" | "giga";
+
+const unitKeys: Record<SizeUnits, Record<SizeStep, MessageKey>> = {
+  binary: { kilo: "unit.kib", mega: "unit.mib", giga: "unit.gib" },
+  decimal: { kilo: "unit.kb", mega: "unit.mb", giga: "unit.gb" },
+};
+
+// memGiga 回傳以 GiB (二進位) 或 GB (十進位) 表示的數值字串, 取一位小數.
+export function memGiga(bytes: number, units: SizeUnits): string {
+  return (bytes / base(units) ** 3).toFixed(1);
 }
 
-// formatSize 把檔案大小格式化為 KB, MB 或 GB (皆以 1024 進位), 小於 0.1 MB 用 KB,
-// 達 1 GB 用 GB; MB 與 GB 取一位小數.
-export function formatSize(bytes: number, t: Translator): string {
-  if (bytes < MiB / 10) {
-    return t("unit.kb", { value: Math.round(bytes / 1024) });
+// memGigaKey 回傳 GiB 或 GB 的單位文字鍵, 其文字含 {value} 參數.
+export function memGigaKey(units: SizeUnits): MessageKey {
+  return unitKeys[units].giga;
+}
+
+// bytesUnit 依大小選擇 GiB 或 MiB (十進位為 GB 或 MB), 回傳數值字串與單位文字鍵.
+export function bytesUnit(bytes: number, units: SizeUnits): { value: string; key: MessageKey } {
+  const b = base(units);
+  if (bytes >= b ** 3) {
+    return { value: memGiga(bytes, units), key: unitKeys[units].giga };
   }
-  if (bytes >= GiB) {
-    return t("unit.gb", { value: (bytes / GiB).toFixed(1) });
+  return { value: String(Math.round(bytes / b ** 2)), key: unitKeys[units].mega };
+}
+
+// formatSize 把檔案大小格式化為 KiB, MiB 或 GiB (十進位為 kB, MB 或 GB), 小於 0.1 MiB
+// (十進位為 0.1 MB) 用 KiB (kB), 達 1 GiB (GB) 用 GiB (GB); MiB (MB) 與 GiB (GB) 取一位小數.
+export function formatSize(bytes: number, units: SizeUnits, t: Translator): string {
+  const b = base(units);
+  const keys = unitKeys[units];
+  if (bytes < b ** 2 / 10) {
+    return t(keys.kilo, { value: Math.round(bytes / b) });
   }
-  return t("unit.mb", { value: (bytes / MiB).toFixed(1) });
+  if (bytes >= b ** 3) {
+    return t(keys.giga, { value: (bytes / b ** 3).toFixed(1) });
+  }
+  return t(keys.mega, { value: (bytes / b ** 2).toFixed(1) });
 }
 
 // formatDuration 把微秒的長度格式化為 "N min", "H h M min" 或 "D d H h"; 不足 1 小時

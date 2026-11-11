@@ -5,7 +5,7 @@ import { ChevronDown, ChevronRight, CloseIcon, FilterIcon, SortIcon } from "../c
 import { ProcessFilterDialog } from "../dialogs/ProcessFilterDialog";
 import { bytesUnit } from "../format";
 import { useT, type MessageKey } from "../i18n";
-import { defaultProcSort, procFilterEmpty, setProcessFilter, setProcessSort, settingsStore } from "../state/app";
+import { defaultProcSort, procFilterEmpty, setProcessFilter, setProcessSort, settingsStore, useSizeUnits } from "../state/app";
 import { useStore } from "../state/store";
 
 // columns 為表格的欄位, 依顯示順序排列. num 為數值欄, 靠右對齊.
@@ -112,6 +112,7 @@ export const ProcessTable = memo(function ProcessTable({
   const t = useT();
   const sort = useStore(settingsStore, (s) => s?.proc_sorts?.[hostID]) ?? defaultProcSort;
   const filter = useStore(settingsStore, (s) => s?.proc_filters?.[hostID]);
+  const units = useSizeUnits();
   const [filtering, setFiltering] = useState(false);
   const shown = useMemo(() => sortProcs(filterProcs(procs, filter), sort), [procs, filter, sort]);
 
@@ -225,7 +226,7 @@ export const ProcessTable = memo(function ProcessTable({
               </tr>
             )}
             {shown.map((p) => {
-              const mem = p.mem === null ? null : bytesUnit(p.mem);
+              const mem = p.mem === null ? null : bytesUnit(p.mem, units);
               return (
                 <tr key={`${p.gpu}-${p.pid}`}>
                   <td>
@@ -238,7 +239,7 @@ export const ProcessTable = memo(function ProcessTable({
                     </span>
                   </td>
                   <td className={`num${mem ? "" : " na"}`}>
-                    {mem ? t(mem.unit === "gib" ? "unit.gib" : "unit.mib", { value: mem.value }) : t("value.na")}
+                    {mem ? t(mem.key, { value: mem.value }) : t("value.na")}
                   </td>
                   <td className="cmd" title={p.cmd}>
                     {p.cmd}

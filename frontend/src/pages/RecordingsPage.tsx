@@ -5,7 +5,7 @@ import type { RecordingFile, RecordingListing } from "../api/types";
 import { DeleteIcon } from "../components/Icons";
 import { formatDateRange, formatDateTime, formatDuration, formatSize } from "../format";
 import { useT, type Translator } from "../i18n";
-import { openRecording, recordingsListStore, reportOperationFailure } from "../state/app";
+import { openRecording, recordingsListStore, reportOperationFailure, useSizeUnits } from "../state/app";
 import { useStore } from "../state/store";
 import { DeleteRecordingsDialog } from "../dialogs/DeleteRecordingsDialog";
 
@@ -83,6 +83,7 @@ function setSelected(fn: (sel: ReadonlySet<string>) => ReadonlySet<string>): voi
 // 把鍵盤焦點移至該按鍵.
 export function RecordingsPage() {
   const t = useT();
+  const units = useSizeUnits();
   const [listing, setListing] = useState<RecordingListing | null>(null);
   const [failed, setFailed] = useState(false);
   const selected = useStore(recordingsListStore, (r) => r.selected);
@@ -170,10 +171,10 @@ export function RecordingsPage() {
       files: [...g.files]
         .reverse()
         .filter((f) => selected.has(f.path) && !f.active)
-        .map((f) => ({ path: f.path, range: rangeText(f, t), size: formatSize(f.size, t) })),
+        .map((f) => ({ path: f.path, range: rangeText(f, t), size: formatSize(f.size, units, t) })),
     }))
     .filter((g) => g.files.length > 0);
-  const deleteSkipped = skipped.filter((s) => selected.has(s.path)).map((s) => ({ path: s.path, size: formatSize(s.size, t) }));
+  const deleteSkipped = skipped.filter((s) => selected.has(s.path)).map((s) => ({ path: s.path, size: formatSize(s.size, units, t) }));
 
   const doDelete = async () => {
     setConfirming(false);
@@ -195,7 +196,7 @@ export function RecordingsPage() {
         <span className="toolbar-title">{t("page.recordings")}</span>
         {listing && (
           <span className="rec-summary">
-            {t("recordings.summary", { files: fileCount(files.length, t), size: formatSize(totalSize, t) })}
+            {t("recordings.summary", { files: fileCount(files.length, t), size: formatSize(totalSize, units, t) })}
           </span>
         )}
         <span className="flex1" />
@@ -221,7 +222,7 @@ export function RecordingsPage() {
               <span className="rec-host">{g.host}</span>
               <span className="flex1" />
               <span className="rec-summary">
-                {t("recordings.summary", { files: fileCount(g.files.length, t), size: formatSize(g.total_size, t) })}
+                {t("recordings.summary", { files: fileCount(g.files.length, t), size: formatSize(g.total_size, units, t) })}
               </span>
             </header>
             <ul className="rec-list">
@@ -235,7 +236,7 @@ export function RecordingsPage() {
                   label={rangeText(f, t)}
                   note={f.active ? t("recordings.active") : f.has_data ? undefined : t("recordings.noData")}
                   duration={f.has_data ? formatDuration(f.end - f.start, t) : undefined}
-                  size={formatSize(f.size, t)}
+                  size={formatSize(f.size, units, t)}
                   onOpen={() => openRecording(f.path)}
                   openText={t("recordings.open")}
                   openRef={f.path === solePath ? soleRef : undefined}
@@ -258,7 +259,7 @@ export function RecordingsPage() {
                   onToggle={() => toggle(s.path, !selected.has(s.path))}
                   label={s.path}
                   note={s.error}
-                  size={formatSize(s.size, t)}
+                  size={formatSize(s.size, units, t)}
                 />
               ))}
             </ul>
@@ -268,7 +269,7 @@ export function RecordingsPage() {
       {confirming && (
         <DeleteRecordingsDialog
           count={deletable.length}
-          size={formatSize(deletableSize, t)}
+          size={formatSize(deletableSize, units, t)}
           groups={deleteGroups}
           skipped={deleteSkipped}
           onCancel={() => setConfirming(false)}

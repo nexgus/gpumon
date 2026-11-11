@@ -1,9 +1,10 @@
 import { memo } from "react";
-import type { Device, LiveGPU } from "../api/types";
+import type { Device, LiveGPU, SizeUnits } from "../api/types";
 import { Chart, ChartLegend, type ChartData, type ChartEdge, type ChartSeries } from "../chart/Chart";
 import { ChevronDown, ChevronRight } from "../components/Icons";
-import { gib } from "../format";
+import { memGiga, memGigaKey } from "../format";
 import { useT, type Translator } from "../i18n";
+import { useSizeUnits } from "../state/app";
 
 function Bar({ pct, color }: { pct: number; color: string }) {
   return (
@@ -18,19 +19,21 @@ function Value({ text, big }: { text: string | null; big?: boolean }) {
   return <span className={`${big ? "readout-big" : "readout-value"}${text === null ? " na" : ""}`}>{text ?? t("value.na")}</span>;
 }
 
-function memText(used: number | null, total: number | null | undefined, t: Translator): string | null {
+function memText(used: number | null, total: number | null | undefined, units: SizeUnits, t: Translator): string | null {
   if (used === null) {
     return null;
   }
+  const key = memGigaKey(units);
   if (!total) {
-    return t("unit.gib", { value: gib(used) });
+    return t(key, { value: memGiga(used, units) });
   }
-  return t("value.pair", { used: gib(used), total: t("unit.gib", { value: gib(total) }) });
+  return t("value.pair", { used: memGiga(used, units), total: t(key, { value: memGiga(total, units) }) });
 }
 
 // Readouts 為 GPU 卡片左側的文字讀數. gpu 為 undefined 時 (尚無取樣) 全部顯示 N/A.
 const Readouts = memo(function Readouts({ device, gpu }: { device: Device; gpu: LiveGPU | undefined }) {
   const t = useT();
+  const units = useSizeUnits();
   const v = (x: number | null | undefined) => (x === null || x === undefined ? null : x);
   const util = v(gpu?.util);
   const used = v(gpu?.mem_used);
@@ -65,7 +68,7 @@ const Readouts = memo(function Readouts({ device, gpu }: { device: Device; gpu: 
       <div className="readout-main">
         <div className="readout-line">
           <span className="readout-label">{t("readout.mem")}</span>
-          <Value big text={memText(used, total, t)} />
+          <Value big text={memText(used, total, units, t)} />
         </div>
         <Bar pct={used !== null && total ? (used / total) * 100 : 0} color="--curve-mem" />
       </div>

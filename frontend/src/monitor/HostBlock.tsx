@@ -3,7 +3,7 @@ import type { Curve, Device, HostStatus, Live } from "../api/types";
 import { fieldsFor, gpuSeries, toChartData } from "../chart/gpuSeries";
 import { formatClock } from "../format";
 import { useT } from "../i18n";
-import { emptyLive, liveStore, setGPUCollapsed, setProcessesCollapsed } from "../state/app";
+import { emptyLive, liveStore, setGPUCollapsed, setProcessesCollapsed, useSizeUnits } from "../state/app";
 import { useStore } from "../state/store";
 import { GpuRow } from "./GpuRow";
 import { ProcessTable } from "./ProcessTable";
@@ -28,6 +28,7 @@ export interface HostBlockProps {
 // 卡片時只顯示一行說明; 重新連線中的主機照常顯示斷線前的讀數與曲線.
 export const HostBlock = memo(function HostBlock(p: HostBlockProps) {
   const t = useT();
+  const units = useSizeUnits();
   const { host } = p;
   const live: Live = useStore(liveStore, (m) => m[host.id]) ?? emptyLive(host.id);
   const [chartWidth, setChartWidth] = useState(0);
@@ -55,11 +56,11 @@ export const HostBlock = memo(function HostBlock(p: HostBlockProps) {
     const m = new Map<number, ReturnType<typeof gpuSeries>>();
     if (result) {
       for (const g of gpus) {
-        m.set(g.id, gpuSeries(result, g.id, g, p.curves, t));
+        m.set(g.id, gpuSeries(result, g.id, g, p.curves, units, t));
       }
     }
     return m;
-  }, [result, gpus, p.curves, t]);
+  }, [result, gpus, p.curves, units, t]);
 
   if (!showsCards) {
     let note: string;

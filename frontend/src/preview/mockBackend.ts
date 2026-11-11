@@ -163,6 +163,7 @@ const settings: SettingsData = {
   window: { width: 1280, height: 800, has_position: false, x: 0, y: 0 },
   appearance: (params.get("theme") as SettingsData["appearance"]) ?? "system",
   language: (params.get("lang") as SettingsData["language"]) ?? "en",
+  size_units: params.get("units") === "decimal" ? "decimal" : "binary",
   monitor_span_ms: Number(params.get("span") ?? 300_000),
   history_span_ms: Number(params.get("hspan") ?? 300_000),
   history_all: params.get("hall") === "1",
@@ -643,6 +644,9 @@ export const backend: Backend = {
   },
   async setAppearance() {},
   async setLanguage() {},
+  async setSizeUnits(v) {
+    settings.size_units = v;
+  },
   async setMonitorSpan(ms) {
     settings.monitor_span_ms = ms;
   },

@@ -118,6 +118,11 @@ func (s *SettingsService) SetAppearance(v settings.Appearance) error {
 	return nil
 }
 
+// SetSizeUnits 變更容量的顯示單位制.
+func (s *SettingsService) SetSizeUnits(v settings.SizeUnits) error {
+	return toErr(s.b.store.SetSizeUnits(v))
+}
+
 // SetLanguage 變更介面語言.
 func (s *SettingsService) SetLanguage(v settings.Language) error {
 	if err := s.b.store.SetLanguage(v); err != nil {
