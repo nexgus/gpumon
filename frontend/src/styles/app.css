@@ -242,6 +242,16 @@ button:disabled {
   font-weight: 600;
 }
 
+/* 側欄最下方的版本字串, 以分隔線與入口區隔開, 左緣與入口圖示對齊. */
+.side-version {
+  flex: none;
+  padding: 8px 8px 0;
+  border-top: 1px solid var(--border);
+  color: var(--text-3);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 /* 主區域與工具列. */
 .main {
   flex: 1 1 auto;

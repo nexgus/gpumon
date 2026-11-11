@@ -1,4 +1,5 @@
-import { memo, useState } from "react";
+import { memo, useEffect, useState } from "react";
+import { backend } from "../api/backend";
 import type { HostStatus } from "../api/types";
 import { useT } from "../i18n";
 import {
@@ -96,6 +97,13 @@ export function Sidebar({ onAdd, onEdit, onDelete }: SidebarProps) {
   const hosts = useStore(hostsStore, (h) => h);
   const page = useStore(uiStore, (u) => u.page);
   const selected = useStore(uiStore, (u) => u.selected);
+  const [version, setVersion] = useState("");
+  useEffect(() => {
+    backend.about().then(
+      (info) => setVersion(`v${info.version}`),
+      () => setVersion(""),
+    );
+  }, []);
   return (
     <nav className="sidebar" aria-label={t("sidebar.hosts")}>
       <div className="sidebar-title">{t("app.name")}</div>
@@ -135,6 +143,11 @@ export function Sidebar({ onAdd, onEdit, onDelete }: SidebarProps) {
           {t("sidebar.settings")}
         </button>
       </div>
+      {version !== "" && (
+        <div className="side-version mono ellipsis" title={version}>
+          {version}
+        </div>
+      )}
     </nav>
   );
 }
