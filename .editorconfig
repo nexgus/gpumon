@@ -1,0 +1,10 @@
+root = true
+
+# 編碼為不含 BOM 的 UTF-8, 換行為 LF.
+[*]
+charset = utf-8
+end_of_line = lf
+
+# Windows 批次檔與 PowerShell 腳本的換行為 CRLF, 與 .gitattributes 一致.
+[*.{bat,cmd,ps1}]
+end_of_line = crlf
