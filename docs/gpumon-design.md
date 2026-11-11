@@ -815,8 +815,7 @@ GPU 區塊的配置如下, 位移為區塊內的位移:
 - 安裝範圍 perUser, 不需管理員權限, 安裝目錄為 `%LOCALAPPDATA%\Programs\<廠商>\<產品名>`. 廠商為 Augustus Chen, 產品名為 GPU Monitor.
 - REINSTALLMODE 設 amus, 強制重寫所有檔案, 避免升級時無版本檔案被判定不必複製, 隨後又被舊產品移除.
 - 於 "新增或移除程式" 顯示的圖示為 `assets/icon/gpumon.ico`, 由 `<Icon>` 元素內嵌並以 ARPPRODUCTICON 指定.
-- 含開始功能表與桌面捷徑. 開始功能表的捷徑直接置於程式清單, 不另設資料夾. wixl 不支援 `<UI>` 元素, 無法在安裝過程詢問使用者, 故捷徑不做成可勾選項.
-- Windows 需 WebView2 執行期, Windows 10 / 11 內建.
+- 只建立開始功能表捷徑, 不建立桌面捷徑. 開始功能表的捷徑直接置於程式清單, 不另設資料夾. wixl 不支援 `<UI>` 元素, 無法在安裝過程詢問使用者, 故捷徑不做成可勾選項.- Windows 需 WebView2 執行期, Windows 10 / 11 內建.
 - 安裝包不簽章.
 
 ### 8.4 macOS 安裝包 (.pkg)

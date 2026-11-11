@@ -11,8 +11,8 @@
   AllowSameVersionUpgrades 允許同版本覆蓋, 降級維持拒絕.
 
   安裝範圍為 perUser, 不需管理員權限, 安裝目錄為
-  %LOCALAPPDATA%\Programs\Augustus Chen\GPU Monitor\. 開始功能表與桌面捷徑
-  無條件安裝, 因 wixl 不支援 <UI> 元素, 無法在安裝過程詢問使用者.
+  %LOCALAPPDATA%\Programs\Augustus Chen\GPU Monitor\. 只建立開始功能表捷徑,
+  不建立桌面捷徑; wixl 不支援 <UI> 元素, 無法在安裝過程讓使用者勾選.
 
   圖示檔路徑相對於 build.sh 執行 wixl 時的工作目錄 (專案根目錄). ARPPRODUCTICON
   指定 "新增或移除程式" 顯示的圖示.
@@ -78,27 +78,11 @@
         </Component>
       </Directory>
 
-      <Directory Id="DesktopFolder">
-        <Component Id="GpumonDesktopShortcut" Guid="*" Win64="yes">
-          <Shortcut Id="GpumonDesktopShortcut"
-                    Name="GPU Monitor"
-                    Description="GPU Monitor"
-                    Target="[INSTALLDIR]gpumon.exe"
-                    WorkingDirectory="INSTALLDIR" />
-          <RegistryValue Root="HKCU"
-                         Key="Software\Augustus Chen\GPU Monitor"
-                         Name="desktop_shortcut"
-                         Type="integer"
-                         Value="1"
-                         KeyPath="yes" />
-        </Component>
-      </Directory>
     </Directory>
 
     <Feature Id="Main" Title="GPU Monitor" Level="1">
       <ComponentRef Id="GpumonExe" />
       <ComponentRef Id="GpumonStartMenuShortcut" />
-      <ComponentRef Id="GpumonDesktopShortcut" />
     </Feature>
 
   </Product>
