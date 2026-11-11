@@ -11,6 +11,8 @@ import type {
   HostStatus,
   Language,
   Live,
+  ProcFilter,
+  ProcSort,
   Prompt,
   QuitRequest,
   ServiceError,
@@ -300,6 +302,47 @@ export async function setProcessesCollapsed(hostID: string, collapsed: boolean):
   await saveSetting("collapsed_procs", [...ids].sort(), () => backend.setProcessesCollapsed(hostID, collapsed));
 }
 
+// defaultProcSort 為程序卡片的預設排序方式, 依 GPU 遞增.
+export const defaultProcSort: ProcSort = { column: "gpu", order: "asc" };
+
+// normalizeProcFilter 去除文字條件的前後空白, GPU 編號去除重複並由小到大排列.
+export function normalizeProcFilter(f: ProcFilter): ProcFilter {
+  return {
+    gpus: [...new Set(f.gpus ?? [])].sort((a, b) => a - b),
+    user: f.user.trim(),
+    command: f.command.trim(),
+  };
+}
+
+// procFilterEmpty 回傳過濾條件是否沒有任何條件.
+export function procFilterEmpty(f: ProcFilter | undefined): boolean {
+  return !f || ((f.gpus?.length ?? 0) === 0 && f.user === "" && f.command === "");
+}
+
+// setProcessSort 記住一台主機的程序卡片排序方式; 監看畫面與歷史畫面共用.
+export async function setProcessSort(hostID: string, sort: ProcSort): Promise<void> {
+  const all = { ...(settingsStore.get()?.proc_sorts ?? {}) };
+  if (sort.column === defaultProcSort.column && sort.order === defaultProcSort.order) {
+    delete all[hostID];
+  } else {
+    all[hostID] = sort;
+  }
+  await saveSetting("proc_sorts", all, () => backend.setProcessSort(hostID, sort));
+}
+
+// setProcessFilter 記住一台主機的程序卡片過濾條件; 監看畫面與歷史畫面共用. 沒有任何
+// 條件時清除該主機的記錄.
+export async function setProcessFilter(hostID: string, filter: ProcFilter): Promise<void> {
+  const f = normalizeProcFilter(filter);
+  const all = { ...(settingsStore.get()?.proc_filters ?? {}) };
+  if (procFilterEmpty(f)) {
+    delete all[hostID];
+  } else {
+    all[hostID] = f;
+  }
+  await saveSetting("proc_filters", all, () => backend.setProcessFilter(hostID, f));
+}
+
 // 以下為主機的操作.
 
 export async function addHost(conn: HostConn): Promise<HostStatus> {
@@ -318,7 +361,8 @@ export async function updateHost(id: string, conn: HostConn): Promise<HostStatus
       return next;
     });
     uiStore.update((u) => ({ ...u, selected: u.selected === id ? st.id : u.selected }));
-    // 收合狀態由後端隨主機的識別轉移, 重新讀取設定以取得新的鍵.
+    // 收合狀態與程序卡片的排序方式及過濾條件由後端隨主機的識別轉移, 重新讀取設定以
+    // 取得新的鍵.
     void refreshSettings();
   }
   return st;

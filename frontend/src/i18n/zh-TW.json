@@ -71,6 +71,19 @@
   "readout.clockGpu": "GPU 時脈",
   "readout.clockMem": "記憶體時脈",
 
+  "proc.filter": "過濾",
+  "proc.removeFilter": "移除過濾條件",
+  "proc.noMatch": "沒有符合過濾條件的程序。",
+
+  "filter.title": "過濾程序",
+  "filter.noGpu": "請至少勾選一張 GPU。",
+  "filter.user": "使用者",
+  "filter.userAny": "任何使用者",
+  "filter.command": "指令",
+  "filter.commandAny": "任何指令",
+  "filter.hint": "文字出現於內容的任何位置即符合，不分大小寫。程序須符合所有條件才會顯示。",
+  "filter.clearAll": "全部清除",
+  "filter.apply": "套用",
 
   "gap.title": "無資料 {start} - {end}",
   "gap.unknown": "原因不明",

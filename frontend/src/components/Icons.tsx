@@ -1,7 +1,7 @@
 // 設計稿所用的線條圖示, 以 currentColor 著色.
 import type { ReactNode } from "react";
 
-function Icon({ size = 13, children }: { size?: number; children: ReactNode }) {
+function Icon({ size = 13, stroke = 2, children }: { size?: number; stroke?: number; children: ReactNode }) {
   return (
     <svg
       aria-hidden="true"
@@ -10,7 +10,7 @@ function Icon({ size = 13, children }: { size?: number; children: ReactNode }) {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth={2}
+      strokeWidth={stroke}
       strokeLinecap="round"
       strokeLinejoin="round"
       style={{ flex: "none" }}
@@ -92,4 +92,23 @@ export const ArrowLeftIcon = () => (
   <Icon>
     <path d="M19 12H5M11 6l-6 6 6 6" />
   </Icon>
+);
+
+export const FilterIcon = () => (
+  <Icon>
+    <path d="M3 5h18l-7 8v6l-4-2v-4Z" />
+  </Icon>
+);
+
+export const CloseIcon = ({ size = 10 }: { size?: number }) => (
+  <Icon size={size} stroke={2.5}>
+    <path d="M18 6 6 18M6 6l12 12" />
+  </Icon>
+);
+
+// SortIcon 為欄位名稱旁的實心三角形, up 為真時朝上.
+export const SortIcon = ({ up }: { up: boolean }) => (
+  <svg aria-hidden="true" width={8} height={5} viewBox="0 0 8 5" fill="currentColor" className="sort-icon">
+    <polygon points={up ? "0,5 8,5 4,0" : "0,0 8,0 4,5"} />
+  </svg>
 );

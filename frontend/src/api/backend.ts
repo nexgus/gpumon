@@ -62,6 +62,8 @@ export const backend: Backend = {
   setCurves: (curves) => settings.SetCurves(curves),
   setGPUCollapsed: (hostID, gpuID, collapsed) => settings.SetGPUCollapsed(hostID, gpuID, collapsed),
   setProcessesCollapsed: (hostID, collapsed) => settings.SetProcessesCollapsed(hostID, collapsed),
+  setProcessSort: (hostID, sort) => settings.SetProcessSort(hostID, sort),
+  setProcessFilter: (hostID, filter) => settings.SetProcessFilter(hostID, filter),
 
   about: () => app.About(),
   confirmQuit: () => app.ConfirmQuit(),

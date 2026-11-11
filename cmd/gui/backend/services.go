@@ -157,6 +157,17 @@ func (s *SettingsService) SetProcessesCollapsed(hostID string, collapsed bool) e
 	return toErr(s.b.store.SetProcsCollapsed(hostID, collapsed))
 }
 
+// SetProcessSort 記住主機 (以 HostStatus.id 指定) 的程序卡片排序方式.
+func (s *SettingsService) SetProcessSort(hostID string, sort settings.ProcSort) error {
+	return toErr(s.b.store.SetProcSort(hostID, sort))
+}
+
+// SetProcessFilter 記住主機 (以 HostStatus.id 指定) 的程序卡片過濾條件; 沒有任何
+// 條件時清除.
+func (s *SettingsService) SetProcessFilter(hostID string, filter settings.ProcFilter) error {
+	return toErr(s.b.store.SetProcFilter(hostID, filter))
+}
+
 // AppService 提供關於視窗所需的程式資訊與結束程式的確認.
 type AppService struct{ b *Backend }
 

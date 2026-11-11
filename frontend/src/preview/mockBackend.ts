@@ -11,6 +11,7 @@ import type {
   HostConn,
   HostStatus,
   Live,
+  ProcColumn,
   RecordedProcesses,
   RecordingGroup,
   RecordingInfo,
@@ -22,6 +23,7 @@ import type {
 } from "../api/types";
 
 const GiB = 1024 ** 3;
+const MiB = 1024 ** 2;
 const params = new URLSearchParams(location.search);
 // now 為假資料的 "目前時刻"; 傳入 now=<Unix 秒> 時固定, 使截圖的時間軸可重現.
 const fixedNow = params.get("now") ? Number(params.get("now")) * 1e6 : 0;
@@ -167,6 +169,22 @@ const settings: SettingsData = {
   curves: (params.get("curves")?.split(",") as SettingsData["curves"]) ?? ["util", "mem"],
   collapsed_gpus: params.get("collapse") === "1" ? { "sweetener@10.90.20.55": [2] } : {},
   collapsed_procs: params.get("pcollapse") === "1" ? ["sweetener@10.90.20.55"] : [],
+  // psort 為 <欄位>-<方向>, 例如 mem-desc; pfilter=1 設定 USER 與 COMMAND 兩項條件,
+  // pfilter=none 設定沒有任何程序符合的條件. 皆套用於主要主機.
+  proc_sorts: params.get("psort")
+    ? {
+        "sweetener@10.90.20.55": {
+          column: params.get("psort")!.split("-")[0] as ProcColumn,
+          order: params.get("psort")!.split("-")[1] === "desc" ? "desc" : "asc",
+        },
+      }
+    : {},
+  proc_filters:
+    params.get("pfilter") === "1"
+      ? { "sweetener@10.90.20.55": { gpus: [], user: "mlin", command: "python" } }
+      : params.get("pfilter") === "none"
+        ? { "sweetener@10.90.20.55": { gpus: [], user: "", command: "blender" } }
+        : {},
 };
 
 const choices: Choices = {
@@ -273,6 +291,10 @@ function makeLive(h: MockHost): Live {
           { gpu: 0, pid: 48377, user: "mlin", mem: 16.6 * GiB, util: 7, cmd: "python -m vllm.entrypoints.openai.api_server" },
           { gpu: 1, pid: 51902, user: "sweetener", mem: 22.1 * GiB, util: 34, cmd: "python eval.py --ckpt runs/1104/last.pt --data /mnt/datasets/imagenet-21k/train --workers 32 --batch-size 256 --precision bf16 --log-dir /home/sweetener/experiments/2026-11/vit_l_eval_run_0042" },
           { gpu: 2, pid: 2217, user: "sweetener", mem: null, util: null, cmd: "/usr/lib/xorg/Xorg" },
+          { gpu: 1, pid: 50871, user: "mlin", mem: 21.3 * GiB, util: 41, cmd: "python -u /home/mlin/experiments/finetune/run_finetune.py --config configs/lora_r64.yaml --output-dir /data/mlin/runs/1104 --resume latest" },
+          { gpu: 0, pid: 49102, user: "Kchen", mem: 3.2 * GiB, util: 2, cmd: "jupyter-lab --no-browser --port 8890" },
+          { gpu: 1, pid: 52310, user: "kchen", mem: 812 * MiB, util: 0, cmd: "Python bench/matmul.py --size 8192" },
+          { gpu: 2, pid: 3150, user: "gdm", mem: null, util: null, cmd: "/usr/bin/gnome-shell" },
         ]
       : h.seed === 2
         ? [{ gpu: 0, pid: 9921, user: "alice", mem: 21.2 * GiB, util: 95, cmd: "python finetune.py --epochs 40" }]
@@ -629,6 +651,24 @@ export const backend: Backend = {
   async setProcessesCollapsed(hostID, collapsed) {
     const rest = (settings.collapsed_procs ?? []).filter((id) => id !== hostID);
     settings.collapsed_procs = collapsed ? [...rest, hostID].sort() : rest;
+  },
+  async setProcessSort(hostID, sort) {
+    const all = { ...(settings.proc_sorts ?? {}) };
+    if (sort.column === "gpu" && sort.order === "asc") {
+      delete all[hostID];
+    } else {
+      all[hostID] = sort;
+    }
+    settings.proc_sorts = all;
+  },
+  async setProcessFilter(hostID, filter) {
+    const all = { ...(settings.proc_filters ?? {}) };
+    if ((filter.gpus?.length ?? 0) === 0 && filter.user === "" && filter.command === "") {
+      delete all[hostID];
+    } else {
+      all[hostID] = filter;
+    }
+    settings.proc_filters = all;
   },
   async about() {
     const windows = params.get("platform") === "windows";

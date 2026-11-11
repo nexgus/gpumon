@@ -662,3 +662,136 @@ func TestDefaultDir(t *testing.T) {
 		t.Errorf("HistoryDir = %s", got)
 	}
 }
+
+func TestProcSortAndFilter(t *testing.T) {
+	dir := t.TempDir()
+	s := mustOpen(t, dir)
+	for _, a := range []string{"a", "b"} {
+		if err := s.AddHost(HostConn{Addr: a, User: "u"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := s.ProcSort("u@a"); got != DefaultProcSort() {
+		t.Errorf("default sort = %+v", got)
+	}
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	must(s.SetProcSort("u@a", ProcSort{Column: ProcColumnMem, Order: SortDesc}))
+	must(s.SetProcSort("u@b", ProcSort{Column: ProcColumnUser, Order: SortAsc}))
+	must(s.SetProcSort("u@b", DefaultProcSort()))
+	must(s.SetProcFilter("u@a", ProcFilter{GPUs: []int{2, 0, 2}, User: "  mlin ", Command: "python"}))
+	must(s.SetProcFilter("u@b", ProcFilter{User: "x"}))
+	must(s.SetProcFilter("u@b", ProcFilter{GPUs: []int{}, User: "   "}))
+
+	s2 := mustOpen(t, dir)
+	d := s2.Snapshot()
+	if !reflect.DeepEqual(d.ProcSorts, map[string]ProcSort{"u@a": {Column: ProcColumnMem, Order: SortDesc}}) {
+		t.Errorf("sorts = %+v", d.ProcSorts)
+	}
+	want := ProcFilter{GPUs: []int{0, 2}, User: "mlin", Command: "python"}
+	if !reflect.DeepEqual(d.ProcFilters, map[string]ProcFilter{"u@a": want}) {
+		t.Errorf("filters = %+v", d.ProcFilters)
+	}
+	if got := s2.ProcFilter("u@b"); len(got.GPUs) != 0 || got.User != "" || got.Command != "" {
+		t.Errorf("cleared filter = %+v", got)
+	}
+
+	for _, bad := range []ProcSort{{Column: "bogus", Order: SortAsc}, {Column: ProcColumnPID, Order: "up"}} {
+		if err := s2.SetProcSort("u@a", bad); !errors.Is(err, ErrInvalidValue) {
+			t.Errorf("sort %+v accepted: %v", bad, err)
+		}
+	}
+	if err := s2.SetProcSort("", DefaultProcSort()); err == nil {
+		t.Error("empty host id accepted for sort")
+	}
+	if err := s2.SetProcFilter("u@a", ProcFilter{GPUs: []int{-1}}); !errors.Is(err, ErrInvalidValue) {
+		t.Errorf("negative gpu accepted: %v", err)
+	}
+	if err := s2.SetProcFilter("", ProcFilter{User: "x"}); err == nil {
+		t.Error("empty host id accepted for filter")
+	}
+	if got := s2.ProcFilter("u@a"); !reflect.DeepEqual(got, want) {
+		t.Errorf("failed setters must not change state: %+v", got)
+	}
+
+	if err := s2.UpdateHost("u@a", HostConn{Addr: "aa", User: "v"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := s2.ProcSort("v@aa"); got != (ProcSort{Column: ProcColumnMem, Order: SortDesc}) {
+		t.Errorf("sort not migrated on rename: %+v", got)
+	}
+	if got := s2.ProcFilter("v@aa"); !reflect.DeepEqual(got, want) {
+		t.Errorf("filter not migrated on rename: %+v", got)
+	}
+	d = s2.Snapshot()
+	if _, ok := d.ProcSorts["u@a"]; ok {
+		t.Errorf("old sort key kept: %+v", d.ProcSorts)
+	}
+	if _, ok := d.ProcFilters["u@a"]; ok {
+		t.Errorf("old filter key kept: %+v", d.ProcFilters)
+	}
+
+	d.ProcFilters["v@aa"].GPUs[0] = 9
+	if s2.ProcFilter("v@aa").GPUs[0] != 0 {
+		t.Error("snapshot aliases filter gpus")
+	}
+
+	if err := s2.RemoveHost("v@aa"); err != nil {
+		t.Fatal(err)
+	}
+	if d := s2.Snapshot(); len(d.ProcSorts) != 0 || len(d.ProcFilters) != 0 {
+		t.Errorf("sort and filter not removed with host: %+v %+v", d.ProcSorts, d.ProcFilters)
+	}
+}
+
+func TestLoadProcSortAndFilter(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, `{
+	  "version": 1,
+	  "proc_sorts": {
+	    "u@a": {"column": "command", "order": "desc"},
+	    "u@b": {"column": "bogus", "order": "desc"},
+	    "u@c": {"column": "pid", "order": "sideways"},
+	    "u@d": {"column": "bogus", "order": "bogus"},
+	    "u@e": {"column": "gpu", "order": "asc"},
+	    "": {"column": "pid", "order": "desc"}
+	  },
+	  "proc_filters": {
+	    "u@a": {"gpus": [3, 1, 3, -2], "user": " bob ", "command": ""},
+	    "u@b": {"gpus": [], "user": "  ", "command": ""},
+	    "u@c": {"gpus": null, "command": "train"},
+	    "u@d": {}
+	  }
+	}`)
+	d := mustOpen(t, dir).Snapshot()
+	wantSorts := map[string]ProcSort{
+		"u@a": {Column: ProcColumnCommand, Order: SortDesc},
+		"u@b": {Column: ProcColumnGPU, Order: SortDesc},
+		"u@c": {Column: ProcColumnPID, Order: SortAsc},
+	}
+	if !reflect.DeepEqual(d.ProcSorts, wantSorts) {
+		t.Errorf("sorts = %+v", d.ProcSorts)
+	}
+	wantFilters := map[string]ProcFilter{
+		"u@a": {GPUs: []int{1, 3}, User: "bob"},
+		"u@c": {GPUs: []int{}, Command: "train"},
+	}
+	if !reflect.DeepEqual(d.ProcFilters, wantFilters) {
+		t.Errorf("filters = %+v", d.ProcFilters)
+	}
+
+	// 舊設定檔沒有這兩個成員時為預設值, 亦即兩者皆為空.
+	dir = t.TempDir()
+	writeFile(t, dir, `{"version": 1, "collapsed_procs": ["u@a"]}`)
+	s := mustOpen(t, dir)
+	if d := s.Snapshot(); d.ProcSorts == nil || len(d.ProcSorts) != 0 || d.ProcFilters == nil || len(d.ProcFilters) != 0 {
+		t.Errorf("legacy file: %+v %+v", d.ProcSorts, d.ProcFilters)
+	}
+	if s.ProcSort("u@a") != DefaultProcSort() {
+		t.Errorf("legacy sort = %+v", s.ProcSort("u@a"))
+	}
+}

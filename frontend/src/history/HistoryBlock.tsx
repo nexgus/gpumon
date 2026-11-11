@@ -143,6 +143,8 @@ export const HistoryBlock = memo(function HistoryBlock({
       ))}
       {gpus.length > 0 && (
         <ProcessTable
+          hostID={info.host}
+          gpus={gpus}
           title={
             procs === undefined
               ? t("monitor.processes")

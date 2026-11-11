@@ -255,6 +255,23 @@ export interface RecordedProcesses {
   procs: LiveProcess[];
 }
 
+// ProcColumn 為程序卡片可排序的欄位, 依序為 GPU, PID, USER, GPU MEM 與 COMMAND.
+export type ProcColumn = "gpu" | "pid" | "user" | "mem" | "command";
+export type SortOrder = "asc" | "desc";
+
+export interface ProcSort {
+  column: ProcColumn;
+  order: SortOrder;
+}
+
+// ProcFilter 為程序卡片的過濾條件, 各項為空時表示未設定. gpus 由小到大且不重複;
+// user 與 command 為部分相符的文字, 不含前後空白.
+export interface ProcFilter {
+  gpus: number[] | null;
+  user: string;
+  command: string;
+}
+
 export interface WindowSettings {
   width: number;
   height: number;
@@ -277,6 +294,10 @@ export interface SettingsData {
   collapsed_gpus: Record<string, number[] | undefined> | null;
   // collapsed_procs 為程序卡片已收合的主機識別字串.
   collapsed_procs: string[] | null;
+  // proc_sorts 與 proc_filters 以主機識別字串為鍵, 為程序卡片的排序方式與過濾條件;
+  // 預設排序方式與沒有任何條件的過濾條件不存放.
+  proc_sorts: Record<string, ProcSort | undefined> | null;
+  proc_filters: Record<string, ProcFilter | undefined> | null;
 }
 
 // min_span_ms 與 max_monitor_span_ms 為顯示範圍長度的下限與監看畫面的上限 (毫秒).
@@ -376,6 +397,8 @@ export interface Backend {
   setCurves(curves: Curve[]): Promise<void>;
   setGPUCollapsed(hostID: string, gpuID: number, collapsed: boolean): Promise<void>;
   setProcessesCollapsed(hostID: string, collapsed: boolean): Promise<void>;
+  setProcessSort(hostID: string, sort: ProcSort): Promise<void>;
+  setProcessFilter(hostID: string, filter: ProcFilter): Promise<void>;
 
   about(): Promise<AboutInfo>;
   // confirmQuit 於使用者在結束確認視窗按下 "結束" 後呼叫, 程式隨即結束.

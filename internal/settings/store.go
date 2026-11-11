@@ -235,8 +235,8 @@ func (s *Store) AddHost(c HostConn) error {
 	})
 }
 
-// UpdateHost 編輯識別字串為 id 的主機. 只更換表單的四個欄位, 排列位置與
-// 收合狀態皆保留. 新識別與其他主機重複時回傳
+// UpdateHost 編輯識別字串為 id 的主機. 只更換表單的四個欄位, 排列位置, 收合狀態
+// 與程序卡片的排序方式及過濾條件皆保留. 新識別與其他主機重複時回傳
 // ErrDuplicateHost.
 func (s *Store) UpdateHost(id string, c HostConn) error {
 	c, err := normalizeConn(c)
@@ -263,12 +263,21 @@ func (s *Store) UpdateHost(id string, c HostConn) error {
 				}
 			}
 			d.CollapsedProcs = dedupStrings(d.CollapsedProcs)
+			if v, ok := d.ProcSorts[id]; ok {
+				delete(d.ProcSorts, id)
+				d.ProcSorts[newID] = v
+			}
+			if v, ok := d.ProcFilters[id]; ok {
+				delete(d.ProcFilters, id)
+				d.ProcFilters[newID] = v
+			}
 		}
 		return nil
 	})
 }
 
-// RemoveHost 刪除主機及其收合狀態, 其餘主機的順序不變.
+// RemoveHost 刪除主機及其收合狀態與程序卡片的排序方式及過濾條件, 其餘主機的順序
+// 不變.
 func (s *Store) RemoveHost(id string) error {
 	return s.update(func(d *Data) error {
 		i := findHost(d, id)
@@ -278,6 +287,8 @@ func (s *Store) RemoveHost(id string) error {
 		d.Hosts = append(d.Hosts[:i], d.Hosts[i+1:]...)
 		delete(d.CollapsedGPUs, id)
 		d.CollapsedProcs = removeString(d.CollapsedProcs, id)
+		delete(d.ProcSorts, id)
+		delete(d.ProcFilters, id)
 		return nil
 	})
 }
@@ -423,6 +434,64 @@ func (s *Store) SetProcsCollapsed(hostID string, collapsed bool) error {
 			d.CollapsedProcs = dedupStrings(append(d.CollapsedProcs, hostID))
 		} else {
 			d.CollapsedProcs = removeString(d.CollapsedProcs, hostID)
+		}
+		return nil
+	})
+}
+
+// ProcSort 回傳指定主機的程序卡片排序方式, 未設定時為預設排序方式.
+func (s *Store) ProcSort(hostID string) ProcSort {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if v, ok := s.data.ProcSorts[hostID]; ok {
+		return v
+	}
+	return DefaultProcSort()
+}
+
+// SetProcSort 記住指定主機的程序卡片排序方式. 欄位或方向不合法時回傳
+// ErrInvalidValue.
+func (s *Store) SetProcSort(hostID string, v ProcSort) error {
+	if hostID == "" || !validProcColumn(v.Column) || !validSortOrder(v.Order) {
+		return invalid("host %q sort %q %q", hostID, v.Column, v.Order)
+	}
+	return s.update(func(d *Data) error {
+		if v == DefaultProcSort() {
+			delete(d.ProcSorts, hostID)
+		} else {
+			d.ProcSorts[hostID] = v
+		}
+		return nil
+	})
+}
+
+// ProcFilter 回傳指定主機的程序卡片過濾條件, 未設定時各項皆為空.
+func (s *Store) ProcFilter(hostID string) ProcFilter {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v := s.data.ProcFilters[hostID]
+	v.GPUs = append([]int{}, v.GPUs...)
+	return v
+}
+
+// SetProcFilter 記住指定主機的程序卡片過濾條件. 文字去除前後空白, GPU 編號去除
+// 重複並排序; 含負數的 GPU 編號時回傳 ErrInvalidValue. 沒有任何條件時清除該主機
+// 的記錄.
+func (s *Store) SetProcFilter(hostID string, f ProcFilter) error {
+	if hostID == "" {
+		return invalid("host %q", hostID)
+	}
+	for _, id := range f.GPUs {
+		if id < 0 {
+			return invalid("gpu %d", id)
+		}
+	}
+	f = f.normalize()
+	return s.update(func(d *Data) error {
+		if f.empty() {
+			delete(d.ProcFilters, hostID)
+		} else {
+			d.ProcFilters[hostID] = f
 		}
 		return nil
 	})

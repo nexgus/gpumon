@@ -84,6 +84,87 @@ func DefaultCurves() []Curve {
 	return []Curve{CurveUtil, CurveMem}
 }
 
+// ProcColumn 為程序卡片可排序的欄位.
+type ProcColumn string
+
+// 程序卡片欄位的可用值, 依序為 GPU, PID, USER, GPU MEM 與 COMMAND.
+const (
+	ProcColumnGPU     ProcColumn = "gpu"
+	ProcColumnPID     ProcColumn = "pid"
+	ProcColumnUser    ProcColumn = "user"
+	ProcColumnMem     ProcColumn = "mem"
+	ProcColumnCommand ProcColumn = "command"
+)
+
+// SortOrder 為排序方向.
+type SortOrder string
+
+// 排序方向的可用值.
+const (
+	SortAsc  SortOrder = "asc"
+	SortDesc SortOrder = "desc"
+)
+
+// ProcSort 為程序卡片的排序方式. 預設為依 GPU 遞增.
+type ProcSort struct {
+	Column ProcColumn `json:"column"`
+	Order  SortOrder  `json:"order"`
+}
+
+// DefaultProcSort 回傳程序卡片的預設排序方式.
+func DefaultProcSort() ProcSort {
+	return ProcSort{Column: ProcColumnGPU, Order: SortAsc}
+}
+
+// ProcFilter 為程序卡片的過濾條件, 各項為空時表示未設定. GPUs 為 GPU 編號,
+// 由小到大且不重複; User 與 Command 為部分相符的文字, 不含前後空白.
+type ProcFilter struct {
+	GPUs    []int  `json:"gpus"`
+	User    string `json:"user"`
+	Command string `json:"command"`
+}
+
+// empty 回傳是否沒有任何條件.
+func (f ProcFilter) empty() bool {
+	return len(f.GPUs) == 0 && f.User == "" && f.Command == ""
+}
+
+// normalize 去除文字的前後空白, GPU 編號去除重複並排序, 捨棄負數的編號.
+func (f ProcFilter) normalize() ProcFilter {
+	f.User = strings.TrimSpace(f.User)
+	f.Command = strings.TrimSpace(f.Command)
+	f.GPUs = sortedIDs(f.GPUs)
+	return f
+}
+
+// sortedIDs 回傳 ids 中非負的編號, 去除重複並由小到大排列.
+func sortedIDs(ids []int) []int {
+	set := map[int]bool{}
+	for _, id := range ids {
+		if id >= 0 {
+			set[id] = true
+		}
+	}
+	list := make([]int, 0, len(set))
+	for id := range set {
+		list = append(list, id)
+	}
+	sort.Ints(list)
+	return list
+}
+
+func validProcColumn(v ProcColumn) bool {
+	switch v {
+	case ProcColumnGPU, ProcColumnPID, ProcColumnUser, ProcColumnMem, ProcColumnCommand:
+		return true
+	}
+	return false
+}
+
+func validSortOrder(v SortOrder) bool {
+	return v == SortAsc || v == SortDesc
+}
+
 func validAppearance(v Appearance) bool {
 	return v == AppearanceSystem || v == AppearanceLight || v == AppearanceDark
 }
@@ -167,6 +248,12 @@ type Data struct {
 
 	// CollapsedProcs 為程序卡片已收合的主機識別字串, 不含空字串與重複.
 	CollapsedProcs []string `json:"collapsed_procs"`
+
+	// ProcSorts 以主機識別字串為鍵, 值為程序卡片的排序方式; 預設排序方式不存放.
+	ProcSorts map[string]ProcSort `json:"proc_sorts"`
+
+	// ProcFilters 以主機識別字串為鍵, 值為程序卡片的過濾條件; 沒有任何條件時不存放.
+	ProcFilters map[string]ProcFilter `json:"proc_filters"`
 }
 
 // Default 回傳預設設定.
@@ -182,6 +269,8 @@ func Default() Data {
 		Hosts:          []Host{},
 		CollapsedGPUs:  map[string][]int{},
 		CollapsedProcs: []string{},
+		ProcSorts:      map[string]ProcSort{},
+		ProcFilters:    map[string]ProcFilter{},
 	}
 }
 
@@ -194,6 +283,15 @@ func (d Data) clone() Data {
 		c.CollapsedGPUs[k] = append([]int{}, v...)
 	}
 	c.CollapsedProcs = append([]string{}, d.CollapsedProcs...)
+	c.ProcSorts = make(map[string]ProcSort, len(d.ProcSorts))
+	for k, v := range d.ProcSorts {
+		c.ProcSorts[k] = v
+	}
+	c.ProcFilters = make(map[string]ProcFilter, len(d.ProcFilters))
+	for k, v := range d.ProcFilters {
+		v.GPUs = append([]int{}, v.GPUs...)
+		c.ProcFilters[k] = v
+	}
 	return c
 }
 
@@ -266,21 +364,9 @@ func (d *Data) sanitize() {
 
 	collapsed := map[string][]int{}
 	for k, ids := range d.CollapsedGPUs {
-		set := map[int]bool{}
-		for _, id := range ids {
-			if id >= 0 {
-				set[id] = true
-			}
+		if list := sortedIDs(ids); len(list) > 0 {
+			collapsed[k] = list
 		}
-		if len(set) == 0 {
-			continue
-		}
-		list := make([]int, 0, len(set))
-		for id := range set {
-			list = append(list, id)
-		}
-		sort.Ints(list)
-		collapsed[k] = list
 	}
 	d.CollapsedGPUs = collapsed
 
@@ -293,6 +379,30 @@ func (d *Data) sanitize() {
 		}
 	}
 	d.CollapsedProcs = procs
+
+	// 排序方式的欄位或方向不合法時分別改用預設值, 結果為預設排序方式者不存放.
+	sorts := map[string]ProcSort{}
+	for k, v := range d.ProcSorts {
+		if !validProcColumn(v.Column) {
+			v.Column = ProcColumnGPU
+		}
+		if !validSortOrder(v.Order) {
+			v.Order = SortAsc
+		}
+		if k != "" && v != DefaultProcSort() {
+			sorts[k] = v
+		}
+	}
+	d.ProcSorts = sorts
+
+	filters := map[string]ProcFilter{}
+	for k, v := range d.ProcFilters {
+		v = v.normalize()
+		if k != "" && !v.empty() {
+			filters[k] = v
+		}
+	}
+	d.ProcFilters = filters
 }
 
 // 設定操作可能回傳的錯誤.

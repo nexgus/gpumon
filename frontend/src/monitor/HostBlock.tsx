@@ -93,6 +93,8 @@ export const HostBlock = memo(function HostBlock(p: HostBlockProps) {
         />
       ))}
       <ProcessTable
+        hostID={host.id}
+        gpus={gpus}
         title={
           host.state === "reconnecting" && live.has_sample
             ? t("monitor.processesLast", { time: formatClock(live.time) })
