@@ -19,3 +19,6 @@ CLAUDE.md
 
 # build.sh 複製進來供 GUI 內嵌的遠端程式.
 /internal/remotebin/gpumon.bin
+
+# 不追蹤 graphify 的產物
+/graphify-out/

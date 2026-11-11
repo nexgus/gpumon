@@ -12,3 +12,4 @@
 *.icns binary
 *.gif binary
 *.car binary
+graphify-out/graph.json merge=graphify
