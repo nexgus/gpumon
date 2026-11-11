@@ -808,7 +808,7 @@ GPU 區塊的配置如下, 位移為區塊內的位移:
 - 版本單一來源為 `internal/version/version.go` 的常數 `VERSION`, SemVer 形式 x.y.z[-stage.N] (stage 為 alpha, beta 或 rc).
 - 程式版號直接編輯該常數, 不另設維護腳本. 其中 x, y, z, N 皆為不補零的十進位整數. 建置腳本於建置前檢查該常數是否符合此格式, 不符合即中止建置.
 - Commit hash 與建置時間於建置期以 `-ldflags -X` 注入同一套件的變數; 未經建置腳本時顯示 unknown.
-- 完整版本字串為 x.y.z[-stage.N]+<commit>[-dirty], 用於產出檔名與 `--version` 的輸出. `<commit>` 為 commit hash 的前 7 個字元, 未經建置腳本建置時為 `unknown`; 建置時工作目錄有未提交的修改才加上 `-dirty`, 未追蹤的檔案亦視為未提交的修改. MSI Product Version 與 macOS Info.plist 的版本欄位只接受純數字, 另剝除為 x.y.z.
+- 完整版本字串為 x.y.z[-stage.N]+<commit>[-dirty], 用於產出檔名與 `--version` 的輸出. `<commit>` 為最後一次改動產品路徑的 commit 的 hash 前 7 個字元, 未經建置腳本建置, 或沒有任何 commit 改動過產品路徑時為 `unknown`; 建置時產品路徑有未提交的修改才加上 `-dirty`, 未追蹤的檔案亦視為未提交的修改. 產品路徑為內容會進入產出的路徑, 包括原始碼, 內嵌的素材, 授權清單的來源, 安裝包範本與建置工具, 清單由 `scripts/product_commit.sh` 維護, 建置腳本與發布腳本共用. 只改動文件等非產品路徑的 commit 不改變 `<commit>`. MSI Product Version 與 macOS Info.plist 的版本欄位只接受純數字, 另剝除為 x.y.z.
 - GUI 與其內嵌的遠端程式注入同一份版本套件, 兩者的程式版號必然相同. 遠端主機上現有的遠端程式可能由其他版本的 GUI 上傳, 其程式版號不一定與本機的 GUI 相同, 處理方式見第 4 章.
 
 ### 8.3 Windows 安裝包 (.msi)
@@ -853,6 +853,15 @@ GPU 區塊的配置如下, 位移為區塊內的位移:
 - 清單由腳本產生為前端的資料檔, 該檔納入版本控管.
 - 建置腳本每次建置皆重新產生清單, 不設選項. 其他素材的授權條文存於專案內, 產生清單不需網路.
 - 清單內容依固定順序排列. 相依套件與其他素材沒有變動時, 重新產生的資料檔與原檔完全相同.
+
+### 8.7 發布
+
+- 發布腳本為專案根目錄的 `release.sh`, 以 forgectl 將安裝包上傳至 GitHub 的 `nexgus/gpumon` 並建立 release. 腳本須同時相容 bash 與 zsh, 只可直接執行.
+- 版本取自 8.2 的 `VERSION` 常數. 發布腳本可傳入版本, 傳入的版本須與該常數相同. 只發布正式版本 x.y.z, 帶 stage 的版本一律中止.
+- Release 的 tag 名稱為版本本身, 不加 `v`, 指向 8.2 所述最後一次改動產品路徑的 commit, 不一定是 HEAD.
+- 以下任一情形中止發布: 產品路徑有未提交的修改; 該 commit 尚未 push 至 `origin/main`; `bin/` 內找不到以該 commit 建置的 .msi 或 .pkg; 找不到 release note.
+- 上傳的 asset 只有 .msi 與 .pkg, 檔名去掉 commit hash, 例如 `gpumon-0.1.0-windows-amd64.msi` 與 `gpumon-0.1.0-darwin-arm64.pkg`.
+- Release note 存於 `docs/releases/<版本>.md`, 以英文撰寫. 開發期的 release note 可命名為 `<版本>-rc.md`; 正式檔不存在而開發期檔存在時, 發布腳本於全部檢查通過後將其更名為正式檔名並 commit, 只提交該檔, 不 push.
 
 ## 9. 測試環境
 

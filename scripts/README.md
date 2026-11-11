@@ -14,6 +14,12 @@
 
 本工具為獨立的 Go module, 由 `build.sh` 於建置 Windows 版時呼叫, 不需手動執行.
 
+## product_commit.sh
+
+印出最後一次改動產品路徑的 commit, 由 `build.sh` 與 `release.sh` 呼叫, 不需手動執行. 產品路徑為內容會進入產出的路徑, 清單寫在本腳本內; 新增此類路徑時須同步更新該清單. 只改動文件等非產品路徑的 commit 不改變建置產出檔名中的 commit hash, 因此不需重新建置即可發布.
+
+不傳入選項時印出 commit hash 的前 7 個字元, 產品路徑有未提交的修改 (含未追蹤的檔案) 時加上 `-dirty`; 傳入 `--full` 時印出完整的 commit hash.
+
 ## reset-settings.sh, reset-settings.bat
 
 清除 GPU Monitor 的所有設定, 使程式下次啟動時以預設值啟動, 等同首次安裝. 記錄檔保留不動.

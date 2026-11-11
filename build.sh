@@ -98,14 +98,10 @@ if ! printf '%s\n' "$VER" | grep -Eqx "${NUM}\.${NUM}\.${NUM}(-(alpha|beta|rc)\.
     exit 1
 fi
 
-# Commit hash 取前 7 個字元, 工作目錄有未提交的修改 (含未追蹤的檔案) 時加上
-# -dirty; 不在 git 儲存庫內或尚無 commit 時為 unknown.
-if HEAD_HASH=$(git rev-parse --verify -q HEAD 2>/dev/null); then
-    COMMIT=$(printf '%s' "$HEAD_HASH" | cut -c1-7)
-    if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
-        COMMIT="${COMMIT}-dirty"
-    fi
-else
+# Commit hash 取最後一次改動產品路徑的 commit 的前 7 個字元, 產品路徑有未提交的
+# 修改 (含未追蹤的檔案) 時加上 -dirty; 產品路徑清單見 scripts/product_commit.sh.
+# 不在 git 儲存庫內或沒有任何 commit 改動過產品路徑時為 unknown.
+if ! COMMIT=$(bash scripts/product_commit.sh 2>/dev/null); then
     COMMIT=unknown
 fi
 FULLVER="${VER}+${COMMIT}"
