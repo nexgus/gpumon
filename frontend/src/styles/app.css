@@ -753,49 +753,47 @@ button:disabled {
   margin: 0 0 6px;
 }
 
+/* 表格內容區固定為 5.5 列高, 程序超過 5 個時於此區上下捲動. 右側永遠預留捲軸的
+   寬度, 捲軸出現時欄位不移動. */
 .procs-scroll {
-  overflow-x: auto;
+  --procs-row: 25px;
+  height: calc(var(--procs-row) * 6.5);
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
+/* GPU, PID, USER, GPU MEM 四欄依內容決定寬度, COMMAND 欄取得其餘寬度. */
 .procs-table {
   width: 100%;
-  table-layout: fixed;
-  border-collapse: collapse;
-}
-
-.procs-table .col-gpu {
-  width: 76px;
-}
-
-.procs-table .col-pid {
-  width: 84px;
-}
-
-.procs-table .col-user {
-  width: 128px;
-}
-
-.procs-table .col-mem {
-  width: 120px;
+  border-collapse: separate;
+  border-spacing: 0;
 }
 
 .procs-table th {
-  padding: 5px 10px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  box-sizing: border-box;
+  height: var(--procs-row);
+  padding: 0 10px;
   text-align: left;
   font-size: 10px;
   letter-spacing: 0.06em;
+  white-space: nowrap;
   color: var(--text-3);
   font-weight: 500;
+  background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
 
 .procs-table td {
-  padding: 4px 10px;
+  box-sizing: border-box;
+  height: var(--procs-row);
+  padding: 0 10px;
   font-family: var(--font-mono);
   font-size: 12px;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .procs-table .num {
@@ -806,13 +804,24 @@ button:disabled {
   color: var(--text-3);
 }
 
+.procs-table .user {
+  display: block;
+  max-width: 16ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* max-width 為 0 時, 此欄的內容不參與欄寬計算, 過長的指令以省略號截斷. */
+.procs-table .col-cmd {
+  width: 100%;
+}
+
 .procs-table td.cmd {
+  max-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--text-2);
 }
-
-
 
 .procs-table td.procs-empty {
   font-family: var(--font-sans);
