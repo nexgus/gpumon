@@ -51,7 +51,7 @@ if defined GPUMON_DATA_DIR (
 
 rem The GUI executable is gpumon.exe (installed by the .msi) or
 rem gpumon-<version>-windows-amd64.exe (direct output of build.sh).
-tasklist /NH /FO CSV 2>nul | findstr /I /B /C:"\"gpumon" >nul
+tasklist /NH 2>nul | findstr /I /B /C:"gpumon" >nul
 if not errorlevel 1 (
     echo GPU Monitor is running. Quit it first, then run this script again. 1>&2
     set "RC=1"
