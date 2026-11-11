@@ -1,8 +1,13 @@
-// Package icon 內嵌系統匣圖示的眨眼影格. 圖檔由同目錄的 generate.sh 自圖示母版產生,
-// 母版更動後以 bash assets/icon/generate.sh 重新產生並一併提交.
+// Package icon 內嵌應用程式圖示與系統匣圖示的眨眼影格. 圖檔由同目錄的 generate.sh
+// 自圖示母版產生, 母版更動後以 bash assets/icon/generate.sh 重新產生並一併提交.
 package icon
 
 import _ "embed"
+
+// App 為應用程式圖示的 1024 x 1024 點陣圖, 保留透明的外緣.
+//
+//go:embed app-1024.png
+var App []byte
 
 // macOS 選單列的範本圖示 (黑色加 alpha), 編號 0 為睜眼, 3 為閉眼.
 var (

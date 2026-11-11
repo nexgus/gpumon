@@ -787,6 +787,7 @@ GPU 區塊的配置如下, 位移為區塊內的位移:
 - 單一 Go module, `cmd/cli` 為遠端程式, `cmd/gui` 為本機 GUI; 共用套件放 `internal/`.
 - macOS 26 起使用的圖示為 `assets/icon/gpumon.icon`, 由 Icon Composer 建立, 背景為 `#1d5fd1`, 預設與深色外觀相同, 前景為由 `assets/icon/app-foreground.svg` 產生的章魚圖層. `generate.sh` 以 Xcode 26 以上的 actool 將其編譯為 `assets/icon/Assets.car` 並納入版控, 因此只有重新產生圖示時需要 Xcode, 建置腳本不需要. 章魚造型更動時, 須在 Icon Composer 中以新產生的圖層替換並存檔.
 - 應用程式圖示由 `assets/icon/app.svg` 產生, 取其 `.icns` 放入 .app, 其 `.ico` 於建置 Windows 執行檔前由建置腳本以獨立的工具 module `scripts/syso` 轉為只含圖示資源的 `cmd/gui/rsrc_windows_amd64.syso` (建置中間檔, 不入版控, 不含 application manifest), 由 Go 連結進執行檔. 圖示以資源 ID 3 存放, Wails 以此作為 Windows 視窗圖示, 檔案總管亦以此顯示執行檔圖示.
+- GUI 內嵌 `assets/icon/app-1024.png`. macOS 直接執行未包裝於 .app 的執行檔時, 程式啟動後以此圖設定 Dock 圖示, 否則 Dock 只顯示系統預設的執行檔圖示. 執行檔位於 .app 的 `Contents/MacOS` 之內時不設定, Dock 圖示由 .app 內的 Assets.car 或 gpumon.icns 提供 (.app 的情形未實測).
 - 本機 GUI 執行檔名為 gpumon (Windows 為 gpumon.exe), 應用程式顯示名稱為 "GPU Monitor" (視窗標題, 安裝包的產品名稱, 開始功能表與 .app 名稱皆用此名).
 - 遠端程式建置產出名為 gpumon.bin, 由 GUI 內嵌並上傳, 上傳後遠端檔名為 gpumon.
 - 建置順序為先建 `linux/amd64` 的 gpumon.bin, 再建 GUI (GUI 以 `go:embed` 嵌入剛建好的 gpumon.bin), 最後打包.

@@ -6,10 +6,14 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"syscall"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
+	"gpumon/assets/icon"
 	"gpumon/cmd/gui/backend"
 	"gpumon/cmd/gui/shell"
 	"gpumon/frontend"
@@ -40,6 +44,7 @@ func main() {
 
 	app := application.New(application.Options{
 		Name: appinfo.Name,
+		Icon: appIcon(),
 		Services: append([]application.Service{
 			application.NewService(&appinfo.Service{}),
 		}, b.Services()...),
@@ -75,4 +80,19 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+// appIcon 傳回交給 Wails 的應用程式圖示. macOS 直接執行未包裝於 .app 的執行檔時, Dock
+// 沒有圖示可用, 以內嵌的應用程式圖示補上. 執行檔位於 .app 之內時傳回 nil, 由 .app 內的
+// Assets.car 或 gpumon.icns 提供圖示, 以保留 macOS 26 起的圖示樣式; Wails 一經設定圖示
+// 即覆蓋 .app 的圖示. Windows 的視窗圖示取自執行檔內的圖示資源, 此圖示僅在資源缺少時
+// 才被採用.
+func appIcon() []byte {
+	if runtime.GOOS == "darwin" {
+		exe, err := os.Executable()
+		if err == nil && strings.HasSuffix(filepath.Dir(exe), ".app/Contents/MacOS") {
+			return nil
+		}
+	}
+	return icon.App
 }
