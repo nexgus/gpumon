@@ -2,6 +2,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"log"
 	"log/slog"
 	"os"
@@ -51,6 +53,14 @@ func main() {
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(frontend.Assets()),
 		},
+		// 同一資料目錄只允許一個實例. 再次啟動時新的實例直接結束, 原本的實例顯示
+		// 主視窗並移至最前. 資料目錄不同的實例讀寫不同的設定, 可同時執行.
+		SingleInstance: &application.SingleInstanceOptions{
+			UniqueID: instanceID(dataDir),
+			OnSecondInstanceLaunch: func(application.SecondInstanceData) {
+				sh.ShowMain()
+			},
+		},
 		// 任何方式要求結束時, 有主機連線中或重新連線中即先由主視窗確認.
 		ShouldQuit: sh.ShouldQuit,
 		// 終端機的 Ctrl+C 與 SIGTERM 不經由視窗, 無人可回應確認視窗, 改由下方的
@@ -80,6 +90,17 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+// instanceID 傳回單一實例鎖定所用的識別字串, 由 bundle ID 與資料目錄路徑的雜湊值組成.
+// Wails 以此字串作為 macOS 鎖定檔的檔名與 Windows 具名 mutex 的名稱, 故路徑以雜湊值
+// 代替, 避免其中的路徑分隔字元.
+func instanceID(dataDir string) string {
+	if abs, err := filepath.Abs(dataDir); err == nil {
+		dataDir = abs
+	}
+	sum := sha256.Sum256([]byte(dataDir))
+	return "io.github.nexgus.gpumon." + hex.EncodeToString(sum[:8])
 }
 
 // appIcon 傳回交給 Wails 的應用程式圖示. macOS 直接執行未包裝於 .app 的執行檔時, Dock
