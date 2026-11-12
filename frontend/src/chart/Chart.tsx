@@ -1,10 +1,12 @@
 // 可重複使用的曲線圖. 以 canvas 繪製, 縱軸固定為 0 至 100, 橫軸為 [from, to] 的
 // 時刻 (Unix 微秒). 元件只負責繪製與滑鼠懸停的讀數, 不查詢資料, 也不認得監看畫面
 // 或歷史畫面; 資料的換算見 chart/gpuSeries.ts.
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { onThemeChange } from "../theme";
 import { formatClock, formatClockShort } from "../format";
 import { isMac } from "../platform";
+import { useStore, type Store } from "../state/store";
+import type { SharedHover } from "./hoverStore";
 
 export interface ChartSeries {
   key: string;
@@ -67,8 +69,9 @@ export interface ChartProps {
   gapTitle: (start: string, end: string) => string;
   // onWidth 回報曲線圖繪圖區的實際寬度 (CSS 像素), 供呼叫端決定查詢的像素寬度.
   onWidth?: (width: number) => void;
-  // onHover 回報滑鼠所指的時刻; 滑鼠離開時為 null.
-  onHover?: (t: number | null) => void;
+  // hoverStore 為同一畫面的曲線圖共用的滑鼠狀態. 滑鼠所在的曲線圖寫入所指的時刻, 其餘
+  // 曲線圖於同一時刻畫出游標與數值提示.
+  hoverStore: Store<SharedHover>;
   // pinned 為固定時刻, 位於 [from, to] 內時畫一條固定線. onPin 於點選繪圖區時回報該處
   // 的時刻. pinHint 為數值提示最下方的操作說明. 三者皆省略時 (監看畫面) 不啟用.
   pinned?: number | null;
@@ -371,7 +374,7 @@ export const ChartLegend = memo(function ChartLegend({ series, extra }: { series
 });
 
 // 曲線圖的高度由外層的版面決定, 繪圖區的寬與高皆隨外框改變而重繪.
-function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHover, pinned, onPin, pinHint, edge, onZoom, marks }: ChartProps) {
+function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, hoverStore, pinned, onPin, pinHint, edge, onZoom, marks }: ChartProps) {
   const boxRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -397,7 +400,32 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHov
   const [held, setHeld] = useState(false);
   const [panning, setPanning] = useState(false);
   const flinging = edge?.flinging ?? false;
-  const busy = panning || flinging;
+  const id = useId();
+  const shared = useStore(hoverStore, (h) => h);
+  const busy = panning || flinging || shared.panning;
+
+  // 滑鼠所指的時刻寫入共用狀態; 離開時只清除自己寫入的.
+  const publish = useCallback(
+    (t: number | null) => {
+      hoverStore.update((h) => (t === null ? (h.src === id ? { ...h, t: null, src: null } : h) : { ...h, t, src: id }));
+    },
+    [hoverStore, id],
+  );
+
+  // 本張曲線圖的平移同步至共用狀態, 卸載時清除自己寫入的狀態.
+  useEffect(() => {
+    if (!panning) {
+      return;
+    }
+    hoverStore.update((h) => ({ ...h, panning: true }));
+    return () => hoverStore.update((h) => ({ ...h, panning: false }));
+  }, [panning, hoverStore]);
+  useEffect(
+    () => () => {
+      hoverStore.update((h) => (h.src === id ? { ...h, t: null, src: null } : h));
+    },
+    [hoverStore, id],
+  );
 
   // 清除邊緣區的停留計時, 並在已回報捲動時回報停止.
   const resetZone = useCallback(() => {
@@ -579,8 +607,10 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHov
     }
   }, [width, height, from, to, data, series, marks, theme]);
 
+  // own 為真表示滑鼠在本張曲線圖上: 該處為中斷區間時顯示說明, 並附操作說明行. 其餘
+  // 曲線圖只在該時刻有取樣時畫游標與數值提示.
   const describe = useCallback(
-    (x: number): Hover | null => {
+    (x: number, own: boolean): Hover | null => {
       if (width <= 0) {
         return null;
       }
@@ -589,6 +619,9 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHov
       if (data) {
         const gap = data.gaps.find((g) => t >= g.start && t <= g.end);
         if (gap) {
+          if (!own) {
+            return null;
+          }
           return {
             x,
             line: false,
@@ -596,7 +629,7 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHov
               <>
                 <div className="chart-tip-head">{gap.title ?? gapTitle(formatClock(gap.start), formatClock(gap.end))}</div>
                 <div>{gap.detail}</div>
-                {pinHint && <div className="chart-tip-hint">{pinHint}</div>}
+                {own && pinHint && <div className="chart-tip-hint">{pinHint}</div>}
               </>
             ),
           };
@@ -617,7 +650,7 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHov
                     <span className="chart-tip-value">{s.format(i)}</span>
                   </div>
                 ))}
-                {pinHint && <div className="chart-tip-hint">{pinHint}</div>}
+                {own && pinHint && <div className="chart-tip-hint">{pinHint}</div>}
               </>
             ),
           };
@@ -631,14 +664,23 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHov
   // 資料更新時, 滑鼠仍停在圖上則以新資料重算懸停讀數.
   useEffect(() => {
     if (pointer.current !== null) {
-      setHover(describe(pointer.current));
+      setHover(describe(pointer.current, true));
     }
   }, [describe]);
+
+  // 滑鼠在其他曲線圖上時, 依共用的時刻重算本張圖的游標與數值提示.
+  const remoteT = shared.src !== id ? shared.t : null;
+  const remote = useMemo((): Hover | null => {
+    if (remoteT === null || width <= 0) {
+      return null;
+    }
+    return describe(((remoteT - from) / Math.max(1, to - from)) * width, false);
+  }, [remoteT, describe, from, to, width]);
 
   // 捲動使顯示範圍移動時, 游標不動而所指的時刻改變, 須重新回報.
   useEffect(() => {
     if (pointer.current !== null && width > 0) {
-      onHover?.(from + (pointer.current / width) * (to - from));
+      publish(from + (pointer.current / width) * (to - from));
     }
     // 只在顯示範圍改變時回報.
   }, [from, to]);
@@ -676,8 +718,8 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHov
     if (edge && !gesture.current?.pannable && !edge.flinging) {
       checkZone(x);
     }
-    setHover(describe(x));
-    onHover?.(from + (x / Math.max(1, width)) * (to - from));
+    setHover(describe(x, true));
+    publish(from + (x / Math.max(1, width)) * (to - from));
   };
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!edge || e.button !== 0) {
@@ -741,15 +783,16 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHov
     resetZone();
     pointer.current = null;
     setHover(null);
-    onHover?.(null);
+    publish(null);
   };
 
   const pinX =
     pinned !== null && pinned !== undefined && width > 0 && pinned >= from && pinned <= to
       ? ((pinned - from) / Math.max(1, to - from)) * width
       : null;
-  const tipLeft = hover && width > 0 && hover.x > width * 0.62 ? undefined : hover ? hover.x + 8 : undefined;
-  const tipRight = hover && width > 0 && hover.x > width * 0.62 ? width - hover.x + 8 : undefined;
+  const shown = hover ?? remote;
+  const tipLeft = shown && width > 0 && shown.x > width * 0.62 ? undefined : shown ? shown.x + 8 : undefined;
+  const tipRight = shown && width > 0 && shown.x > width * 0.62 ? width - shown.x + 8 : undefined;
 
   return (
     <div className="chart">
@@ -782,10 +825,10 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHov
             <span className={edge.active > 0 ? "chart-edge-arrow active" : "chart-edge-arrow"}>›</span>
           </div>
         )}
-        {!busy && hover?.line && <div className="chart-cursor" style={{ left: hover.x }} />}
-        {!busy && hover && (
+        {!busy && shown?.line && <div className="chart-cursor" style={{ left: shown.x }} />}
+        {!busy && shown && (
           <div className="chart-tip" style={{ left: tipLeft, right: tipRight }}>
-            {hover.lines}
+            {shown.lines}
           </div>
         )}
       </div>

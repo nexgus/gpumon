@@ -2,12 +2,14 @@ import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { backend } from "../api/backend";
 import type { Curve, Device, Field, LiveGPU, LiveProcess, QueryResult, RecordingInfo } from "../api/types";
 import type { ChartEdge, ChartGap, ChartLegendExtra, ChartMarks } from "../chart/Chart";
+import { createHoverStore } from "../chart/hoverStore";
 import { gpuSeries, toChartData } from "../chart/gpuSeries";
 import { formatClock } from "../format";
 import { useT } from "../i18n";
 import { setGPUCollapsed, setMaximaCollapsed, setProcessesCollapsed, useSizeUnits, type MaxSelection } from "../state/app";
 import { GpuRow } from "../monitor/GpuRow";
 import { ProcessTable } from "../monitor/ProcessTable";
+import { useStore } from "../state/store";
 import { useCurveFeed } from "../monitor/useCurveFeed";
 import { findMax, MaximaCard, maxColumns } from "./MaximaCard";
 import { historyFields, liveAt, sampleGPU } from "./readout";
@@ -18,6 +20,8 @@ import { useSampleAt } from "./useSampleAt";
 const noGPUs: number[] = [];
 const noDevices: Device[] = [];
 const noProcs: LiveProcess[] = [];
+// 歷史畫面的曲線圖共用的滑鼠狀態.
+const hoverStore = createHoverStore();
 
 function queryRecording(path: string, from: number, to: number, width: number, fields: Field[]): Promise<QueryResult | null> {
   return backend.queryRecording(path, from, to, width, fields);
@@ -72,7 +76,7 @@ export const HistoryBlock = memo(function HistoryBlock({
   const collapsed = collapsedGPUs ?? noGPUs;
   const anyExpanded = gpus.some((g) => !collapsed.includes(g.id));
   const [chartWidth, setChartWidth] = useState(0);
-  const [hover, setHover] = useState<number | null>(null);
+  const hover = useStore(hoverStore, (h) => h.t);
   const onWidth = useCallback((w: number) => setChartWidth(w), []);
   const onToggle = useCallback(
     (gpuID: number, c: boolean) => void setGPUCollapsed(info.host, gpuID, c),
@@ -175,7 +179,7 @@ export const HistoryBlock = memo(function HistoryBlock({
           data={data}
           series={seriesByGPU.get(g.id) ?? []}
           onWidth={onWidth}
-          onHover={setHover}
+          hoverStore={hoverStore}
           pinned={pinned}
           onPin={onPin}
           pinHint={pinHint}

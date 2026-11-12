@@ -9,10 +9,12 @@ import {
   type ChartMarks,
   type ChartSeries,
 } from "../chart/Chart";
+import type { SharedHover } from "../chart/hoverStore";
 import { ChevronDown, ChevronRight } from "../components/Icons";
 import { memGiga, memGigaKey } from "../format";
 import { useT, type Translator } from "../i18n";
 import { useSizeUnits } from "../state/app";
+import type { Store } from "../state/store";
 
 function Bar({ pct, color }: { pct: number; color: string }) {
   return (
@@ -120,7 +122,8 @@ export interface GpuRowProps {
   data: ChartData | null;
   series: ChartSeries[];
   onWidth: (w: number) => void;
-  onHover?: (t: number | null) => void;
+  // hoverStore 為同一畫面的曲線圖共用的滑鼠狀態, 見 Chart 的 hoverStore.
+  hoverStore: Store<SharedHover>;
   pinned?: number | null;
   onPin?: (t: number) => void;
   pinHint?: string;
@@ -161,7 +164,7 @@ export const GpuRow = memo(function GpuRow(p: GpuRowProps) {
           ariaLabel={t("monitor.gpuChart", { id: p.device.id })}
           gapTitle={(start, end) => t("gap.title", { start, end })}
           onWidth={p.onWidth}
-          onHover={p.onHover}
+          hoverStore={p.hoverStore}
           pinned={p.pinned}
           onPin={p.onPin}
           pinHint={p.pinHint}

@@ -1,5 +1,6 @@
 import { memo, useCallback, useMemo, useState } from "react";
 import type { Curve, Device, HostStatus, Live } from "../api/types";
+import { createHoverStore } from "../chart/hoverStore";
 import { fieldsFor, gpuSeries, toChartData } from "../chart/gpuSeries";
 import { formatClock } from "../format";
 import { useT } from "../i18n";
@@ -11,6 +12,8 @@ import { useLiveCurves } from "./useLiveCurves";
 
 const noGPUs: number[] = [];
 const noDevices: Device[] = [];
+// 監看畫面的曲線圖共用的滑鼠狀態.
+const hoverStore = createHoverStore();
 
 export interface HostBlockProps {
   host: HostStatus;
@@ -90,6 +93,7 @@ export const HostBlock = memo(function HostBlock(p: HostBlockProps) {
           data={data}
           series={seriesByGPU.get(g.id) ?? []}
           onWidth={onWidth}
+          hoverStore={hoverStore}
           onZoom={p.onZoom}
         />
       ))}
