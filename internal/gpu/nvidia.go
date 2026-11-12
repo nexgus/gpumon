@@ -190,13 +190,14 @@ func (g *nvidiaGPU) procs() []protocol.Process {
 			}
 		}
 	}
-	utils := g.processUtil()
+	utils, utilOK := g.processUtil()
 	slices.Sort(pids)
 	out := make([]protocol.Process, 0, len(pids))
 	for _, pid := range pids {
 		p := byPID[pid]
-		if u, ok := utils[pid]; ok {
-			p.Util = intPtr(u)
+		// 查詢成功而不在回報內容中的程序, 於此期間內沒有使用 GPU, 使用率為 0.
+		if utilOK {
+			p.Util = intPtr(utils[pid])
 		}
 		p.User = g.info.user(p.PID)
 		p.Cmd = g.info.cmd(p.PID)
@@ -228,23 +229,34 @@ func (g *nvidiaGPU) runningProcs(fn func(nvmlDevice, *uint32, *nvmlProcessInfo) 
 }
 
 // processUtil 回傳各程序於最近 procUtilWindow 內的平均 SM 使用率, 同一程序有
-// 多筆取樣時取最新一筆. 此期間內沒有使用 GPU 的程序不在回傳的內容中.
-func (g *nvidiaGPU) processUtil() map[uint32]int {
+// 多筆取樣時取最新一筆. 此期間內沒有使用 GPU 的程序不在回傳的內容中. 驅動
+// 程式於此期間內沒有任何取樣時回報 NVML_ERROR_NOT_FOUND, 視為查詢成功而內容
+// 為空. 第二個回傳值為 false 時表示查詢失敗 (GPU 不支援, 例如已啟用 MIG, 或
+// 發生其他錯誤), 各程序的使用率視為取不到.
+func (g *nvidiaGPU) processUtil() (map[uint32]int, bool) {
 	fn := g.lib.getProcessUtil
 	if fn == nil {
-		return nil
+		return nil, false
 	}
 	last := uint64(time.Now().Add(-procUtilWindow).UnixMicro())
 
 	var n uint32
-	r := fn(g.dev, nil, &n, last)
-	if r != nvmlErrInsufficient || n == 0 {
-		return nil
+	switch r := fn(g.dev, nil, &n, last); {
+	case r == nvmlErrNotFound:
+		return nil, true
+	case r != nvmlErrInsufficient && r != nvmlSuccess:
+		return nil, false
+	case n == 0:
+		return nil, true
 	}
 	buf := make([]nvmlProcessUtilizationSample, n+8)
 	n = uint32(len(buf))
-	if fn(g.dev, &buf[0], &n, last) != nvmlSuccess {
-		return nil
+	switch fn(g.dev, &buf[0], &n, last) {
+	case nvmlSuccess:
+	case nvmlErrNotFound:
+		return nil, true
+	default:
+		return nil, false
 	}
 	latest := map[uint32]nvmlProcessUtilizationSample{}
 	for _, s := range buf[:n] {
@@ -256,7 +268,7 @@ func (g *nvidiaGPU) processUtil() map[uint32]int {
 	for pid, s := range latest {
 		out[pid] = int(s.SMUtil)
 	}
-	return out
+	return out, true
 }
 
 // milliToUnit 將毫瓦換算為瓦, 四捨五入.

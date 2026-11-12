@@ -535,6 +535,19 @@ button:disabled {
   font-weight: 600;
 }
 
+/* 同一列有用量與百分比兩個數值時的容器, 百分比在右, 與使用率的數值上下對齊. */
+.readout-group {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  white-space: nowrap;
+}
+
+.readout-group .readout-big:not(:last-child) {
+  color: var(--text-2);
+  font-weight: 500;
+}
+
 .readout-value {
   font-family: var(--font-mono);
   font-size: 12px;

@@ -38,6 +38,8 @@ const Readouts = memo(function Readouts({ device, gpu }: { device: Device; gpu: 
   const util = v(gpu?.util);
   const used = v(gpu?.mem_used);
   const total = device.mem_total;
+  // 記憶體佔比, 取不到已使用量或總量時為 null, 此時不顯示百分比.
+  const memPct = used !== null && total ? (used / total) * 100 : null;
   const temp = v(gpu?.temp);
   const fan = v(gpu?.fan);
   const power = v(gpu?.power_w);
@@ -68,9 +70,12 @@ const Readouts = memo(function Readouts({ device, gpu }: { device: Device; gpu: 
       <div className="readout-main">
         <div className="readout-line">
           <span className="readout-label">{t("readout.mem")}</span>
-          <Value big text={memText(used, total, units, t)} />
+          <span className="readout-group">
+            <Value big text={memText(used, total, units, t)} />
+            {memPct !== null && <span className="readout-big">{t("unit.percent", { value: Math.round(memPct) })}</span>}
+          </span>
         </div>
-        <Bar pct={used !== null && total ? (used / total) * 100 : 0} color="--curve-mem" />
+        <Bar pct={memPct ?? 0} color="--curve-mem" />
       </div>
       <div className="readout-grid">
         {small.map(([label, text]) => (
