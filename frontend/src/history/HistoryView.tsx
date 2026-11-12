@@ -11,11 +11,13 @@ import {
   choicesStore,
   defaultCurves,
   historyStore,
+  selectHistoryMax,
   setHistoryLeft,
   setHistoryPinned,
   setHistorySpan,
   settingsStore,
   showPage,
+  type MaxSelection,
 } from "../state/app";
 import { useStore } from "../state/store";
 import { HistoryBlock } from "./HistoryBlock";
@@ -69,7 +71,9 @@ export function HistoryView() {
   const curves = useStore(settingsStore, (s) => s?.curves) ?? defaultCurves;
   const collapsed = useStore(settingsStore, (s) => s?.collapsed_gpus);
   const collapsedProcs = useStore(settingsStore, (s) => s?.collapsed_procs);
+  const collapsedMaxima = useStore(settingsStore, (s) => s?.collapsed_maxima);
   const pinned = useStore(historyStore, (h) => h.pinned);
+  const maxSel = useStore(historyStore, (h) => h.maxSel);
   const loaded = useInfo(path);
 
   // 有固定時刻且畫面上沒有對話框時, Esc 清除固定時刻. 以擷取階段監聽, 使對話框自己的
@@ -124,8 +128,8 @@ export function HistoryView() {
   const scrollable = info !== null && maxLeft > min && !all;
 
   // 捲動與縮放所需的最新值. 滾輪與自動捲動可能在重新繪製之間連續觸發, 位置與長度以此為準.
-  const view = useRef({ left, span, min, max, total, minLen, maxLeft, scrollable });
-  view.current = { left, span, min, max, total, minLen, maxLeft, scrollable };
+  const view = useRef({ left, span, min, max, total, minLen, maxLeft, scrollable, all });
+  view.current = { left, span, min, max, total, minLen, maxLeft, scrollable, all };
   const moveBy = useCallback((delta: number): boolean => {
     const v = view.current;
     const next = Math.min(v.maxLeft, Math.max(v.min, v.left + delta));
@@ -244,7 +248,27 @@ export function HistoryView() {
   };
 
   const sameDay = info !== null && formatDateTime(min).slice(0, 10) === formatDateTime(max).slice(0, 10);
-  const edgeText = (us: number) => (sameDay ? formatClock(us) : formatDateTime(us));
+  const edgeText = useCallback((us: number) => (sameDay ? formatClock(us) : formatDateTime(us)), [sameDay]);
+
+  // pickMax 為最大值卡片的點選: 選取該格並固定至所選出現處的時刻 t. 顯示範圍的長度不變,
+  // 平移至 t 位於正中央, 超出捲動範圍時停在邊界; 處於顯示全部狀態時不平移. 平移前停止
+  // 慣性捲動與邊緣自動捲動.
+  const pickMax = useCallback(
+    (sel: MaxSelection, t: number) => {
+      stopFling();
+      setEdgeDir(0);
+      const v = view.current;
+      if (!v.all) {
+        const next = Math.min(v.maxLeft, Math.max(v.min, t - v.span / 2));
+        if (next !== v.left) {
+          v.left = next;
+          setHistoryLeft(next);
+        }
+      }
+      selectHistoryMax(sel, t);
+    },
+    [stopFling],
+  );
 
   // 標題為記錄檔的主機名稱, user@addr 與起訖時刻; 讀取完成之前為 "History", 讀取失敗時為檔名.
   let titleText = t("history.title");
@@ -315,8 +339,12 @@ export function HistoryView() {
             curves={curves}
             collapsedGPUs={collapsed?.[info.host]}
             procsCollapsed={collapsedProcs?.includes(info.host) ?? false}
+            maximaCollapsed={collapsedMaxima?.includes(info.host) ?? false}
             pinned={pinned}
             onPin={setHistoryPinned}
+            maxSel={maxSel}
+            onMaxPick={pickMax}
+            timeText={edgeText}
             edge={edge}
             onZoom={zoom}
           />

@@ -52,6 +52,23 @@ export const backend: Backend = {
     }));
     return { time: p.time, procs };
   },
+  maxima: async (path) => {
+    const m = await recording.Maxima(path);
+    const gpus = ((m?.gpus ?? []) as any[]).map((g) => {
+      const fields: Record<string, { value: number; runs: [number, number][] }> = {};
+      for (const [k, v] of Object.entries((g.fields ?? {}) as Record<string, any>)) {
+        if (v && v.runs?.length > 0) {
+          fields[k] = { value: v.value, runs: v.runs };
+        }
+      }
+      return { id: g.id, fields };
+    });
+    return { gpus };
+  },
+  sampleAt: async (path, t) => {
+    const s = await recording.SampleAt(path, int(t));
+    return s ? { time: s.time, gpus: s.gpus ?? [] } : null;
+  },
 
   getSettings: () => settings.Get(),
   choices: () => settings.Choices(),
@@ -63,6 +80,7 @@ export const backend: Backend = {
   setCurves: (curves) => settings.SetCurves(curves),
   setGPUCollapsed: (hostID, gpuID, collapsed) => settings.SetGPUCollapsed(hostID, gpuID, collapsed),
   setProcessesCollapsed: (hostID, collapsed) => settings.SetProcessesCollapsed(hostID, collapsed),
+  setMaximaCollapsed: (hostID, collapsed) => settings.SetMaximaCollapsed(hostID, collapsed),
   setProcessSort: (hostID, sort) => settings.SetProcessSort(hostID, sort),
   setProcessFilter: (hostID, filter) => settings.SetProcessFilter(hostID, filter),
 

@@ -63,6 +63,19 @@ func (s *RecordingService) ProcessesAt(path string, t int64) (*history.ProcessLi
 	return p, toErr(err)
 }
 
+// Maxima 回傳記錄檔中每張 GPU 每個欄位的最大值與其出現處 (Unix 微秒).
+func (s *RecordingService) Maxima(path string) (*history.MaximaResult, error) {
+	m, err := history.Maxima(path)
+	return m, toErr(err)
+}
+
+// SampleAt 回傳記錄檔中時刻不晚於 t (Unix 微秒) 的最近一筆取樣; 沒有, 距 t 超過取樣間隔
+// 的 2 倍, 或其與 t 之間有斷線記錄時回傳 null.
+func (s *RecordingService) SampleAt(path string, t int64) (*history.SampleAtResult, error) {
+	r, err := history.SampleAt(path, t)
+	return r, toErr(err)
+}
+
 // Info 回傳記錄檔的主機, devices 資訊與起訖時刻.
 func (s *RecordingService) Info(path string) (RecordingInfo, error) {
 	f, err := recording.Open(path)
@@ -160,6 +173,11 @@ func (s *SettingsService) SetGPUCollapsed(hostID string, gpuID int, collapsed bo
 // SetProcessesCollapsed 記住主機 (以 HostStatus.id 指定) 的程序卡片是否收合.
 func (s *SettingsService) SetProcessesCollapsed(hostID string, collapsed bool) error {
 	return toErr(s.b.store.SetProcsCollapsed(hostID, collapsed))
+}
+
+// SetMaximaCollapsed 記住主機 (以 HostStatus.id 指定) 的歷史畫面最大值卡片是否收合.
+func (s *SettingsService) SetMaximaCollapsed(hostID string, collapsed bool) error {
+	return toErr(s.b.store.SetMaximaCollapsed(hostID, collapsed))
 }
 
 // SetProcessSort 記住主機 (以 HostStatus.id 指定) 的程序卡片排序方式.

@@ -205,6 +205,41 @@ export interface QueryResult {
   gaps: Gap[] | null;
 }
 
+// FieldMax 為單張 GPU 單一欄位於整個記錄檔的最大值. runs 為最大值的出現處, 依時刻遞增,
+// 每個元素為該處第一筆與最後一筆取樣的時刻 (Unix 微秒).
+export interface FieldMax {
+  value: number;
+  runs: [number, number][];
+}
+
+// GPUMaxima 為單張 GPU 各欄位的最大值; 整個記錄檔沒有數值的欄位不含該鍵.
+export interface GPUMaxima {
+  id: number;
+  fields: Partial<Record<Field, FieldMax>>;
+}
+
+export interface RecordingMaxima {
+  gpus: GPUMaxima[];
+}
+
+// SampleGPU 為一筆取樣中單張 GPU 的數值, 無值的欄位為 null.
+export interface SampleGPU {
+  id: number;
+  util: number | null;
+  mem_used: number | null;
+  temp: number | null;
+  fan: number | null;
+  power_w: number | null;
+  clock_gpu: number | null;
+  clock_mem: number | null;
+}
+
+// RecordedSample 為記錄檔中的一筆取樣; time 為該筆的時刻 (Unix 微秒).
+export interface RecordedSample {
+  time: number;
+  gpus: SampleGPU[];
+}
+
 // RecordingFile 為記錄檔清單中的一個檔案. start 與 end 為檔案內第一筆與最後一筆
 // 記錄的時刻 (Unix 微秒); active 表示該檔案為連線中, 不可刪除.
 export interface RecordingFile {
@@ -301,6 +336,8 @@ export interface SettingsData {
   collapsed_gpus: Record<string, number[] | undefined> | null;
   // collapsed_procs 為程序卡片已收合的主機識別字串.
   collapsed_procs: string[] | null;
+  // collapsed_maxima 為歷史畫面最大值卡片已收合的主機識別字串.
+  collapsed_maxima: string[] | null;
   // proc_sorts 與 proc_filters 以主機識別字串為鍵, 為程序卡片的排序方式與過濾條件;
   // 預設排序方式與沒有任何條件的過濾條件不存放.
   proc_sorts: Record<string, ProcSort | undefined> | null;
@@ -394,6 +431,11 @@ export interface Backend {
   recordingInfo(path: string): Promise<RecordingInfo>;
   queryRecording(path: string, from: number, to: number, width: number, fields: Field[]): Promise<QueryResult | null>;
   processesAt(path: string, t: number): Promise<RecordedProcesses | null>;
+  // maxima 回傳記錄檔中每張 GPU 每個欄位於整個記錄檔的最大值與其出現處.
+  maxima(path: string): Promise<RecordingMaxima>;
+  // sampleAt 回傳記錄檔中時刻不晚於 t 的最近一筆取樣; 沒有, 距 t 超過取樣間隔的 2 倍,
+  // 或其與 t 之間有斷線記錄時為 null.
+  sampleAt(path: string, t: number): Promise<RecordedSample | null>;
 
   getSettings(): Promise<SettingsData>;
   choices(): Promise<Choices>;
@@ -405,6 +447,7 @@ export interface Backend {
   setCurves(curves: Curve[]): Promise<void>;
   setGPUCollapsed(hostID: string, gpuID: number, collapsed: boolean): Promise<void>;
   setProcessesCollapsed(hostID: string, collapsed: boolean): Promise<void>;
+  setMaximaCollapsed(hostID: string, collapsed: boolean): Promise<void>;
   setProcessSort(hostID: string, sort: ProcSort): Promise<void>;
   setProcessFilter(hostID: string, filter: ProcFilter): Promise<void>;
 

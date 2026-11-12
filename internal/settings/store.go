@@ -263,6 +263,12 @@ func (s *Store) UpdateHost(id string, c HostConn) error {
 				}
 			}
 			d.CollapsedProcs = dedupStrings(d.CollapsedProcs)
+			for j, p := range d.CollapsedMaxima {
+				if p == id {
+					d.CollapsedMaxima[j] = newID
+				}
+			}
+			d.CollapsedMaxima = dedupStrings(d.CollapsedMaxima)
 			if v, ok := d.ProcSorts[id]; ok {
 				delete(d.ProcSorts, id)
 				d.ProcSorts[newID] = v
@@ -287,6 +293,7 @@ func (s *Store) RemoveHost(id string) error {
 		d.Hosts = append(d.Hosts[:i], d.Hosts[i+1:]...)
 		delete(d.CollapsedGPUs, id)
 		d.CollapsedProcs = removeString(d.CollapsedProcs, id)
+		d.CollapsedMaxima = removeString(d.CollapsedMaxima, id)
 		delete(d.ProcSorts, id)
 		delete(d.ProcFilters, id)
 		return nil
@@ -442,6 +449,33 @@ func (s *Store) SetProcsCollapsed(hostID string, collapsed bool) error {
 			d.CollapsedProcs = dedupStrings(append(d.CollapsedProcs, hostID))
 		} else {
 			d.CollapsedProcs = removeString(d.CollapsedProcs, hostID)
+		}
+		return nil
+	})
+}
+
+// MaximaCollapsed 回傳指定主機的最大值卡片是否已收合.
+func (s *Store) MaximaCollapsed(hostID string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, id := range s.data.CollapsedMaxima {
+		if id == hostID {
+			return true
+		}
+	}
+	return false
+}
+
+// SetMaximaCollapsed 記住指定主機的最大值卡片是否收合.
+func (s *Store) SetMaximaCollapsed(hostID string, collapsed bool) error {
+	if hostID == "" {
+		return invalid("host %q", hostID)
+	}
+	return s.update(func(d *Data) error {
+		if collapsed {
+			d.CollapsedMaxima = dedupStrings(append(d.CollapsedMaxima, hostID))
+		} else {
+			d.CollapsedMaxima = removeString(d.CollapsedMaxima, hostID)
 		}
 		return nil
 	})

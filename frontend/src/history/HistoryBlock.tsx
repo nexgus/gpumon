@@ -1,16 +1,19 @@
-import { memo, useCallback, useMemo, useState } from "react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { backend } from "../api/backend";
-import type { Curve, Device, Field, LiveProcess, QueryResult, RecordingInfo } from "../api/types";
-import type { ChartEdge, ChartGap } from "../chart/Chart";
+import type { Curve, Device, Field, LiveGPU, LiveProcess, QueryResult, RecordingInfo } from "../api/types";
+import type { ChartEdge, ChartGap, ChartLegendExtra, ChartMarks } from "../chart/Chart";
 import { gpuSeries, toChartData } from "../chart/gpuSeries";
 import { formatClock } from "../format";
 import { useT } from "../i18n";
-import { setGPUCollapsed, setProcessesCollapsed, useSizeUnits } from "../state/app";
+import { setGPUCollapsed, setMaximaCollapsed, setProcessesCollapsed, useSizeUnits, type MaxSelection } from "../state/app";
 import { GpuRow } from "../monitor/GpuRow";
 import { ProcessTable } from "../monitor/ProcessTable";
 import { useCurveFeed } from "../monitor/useCurveFeed";
-import { historyFields, liveAt } from "./readout";
+import { findMax, MaximaCard, maxColumns } from "./MaximaCard";
+import { historyFields, liveAt, sampleGPU } from "./readout";
+import { useMaxima } from "./useMaxima";
 import { useProcessesAt } from "./useProcessesAt";
+import { useSampleAt } from "./useSampleAt";
 
 const noGPUs: number[] = [];
 const noDevices: Device[] = [];
@@ -28,18 +31,25 @@ export interface HistoryBlockProps {
   curves: Curve[];
   collapsedGPUs: number[] | undefined;
   procsCollapsed: boolean;
+  maximaCollapsed: boolean;
   // pinned 為歷史畫面的固定時刻 (Unix 微秒), null 為未固定. onPin 於點選曲線圖時
   // 回報該處的時刻.
   pinned: number | null;
   onPin: (t: number) => void;
+  // maxSel 為最大值卡片的選取; onMaxPick 於點選最大值或切換出現處時回報新的選取與該處的
+  // 時刻. timeText 回傳時刻的文字, 格式同固定時刻標籤.
+  maxSel: MaxSelection | null;
+  onMaxPick: (sel: MaxSelection, t: number) => void;
+  timeText: (us: number) => string;
   // edge 為曲線圖的橫向捲動介面. onZoom 回報曲線圖上的滾輪與捏合縮放.
   edge: ChartEdge;
   onZoom: (factor: number, at: number) => void;
 }
 
-// HistoryBlock 為歷史畫面中記錄檔的內容: 每張 GPU 的卡片與程序卡片. 文字讀數與程序
-// 卡片顯示滑鼠在曲線圖上所指的時刻; 滑鼠不在曲線圖上時, 有固定時刻則顯示固定時刻,
-// 否則顯示顯示範圍右緣的時刻.
+// HistoryBlock 為歷史畫面中記錄檔的內容: 最大值卡片, 每張 GPU 的卡片與程序卡片. 文字
+// 讀數與程序卡片顯示滑鼠在曲線圖上所指的時刻; 滑鼠不在曲線圖上時, 有固定時刻則顯示固定
+// 時刻, 否則顯示顯示範圍右緣的時刻. 固定時刻的文字讀數為當筆取樣的實際數值, 不取曲線
+// 查詢的平均值.
 export const HistoryBlock = memo(function HistoryBlock({
   info,
   from,
@@ -47,8 +57,12 @@ export const HistoryBlock = memo(function HistoryBlock({
   curves,
   collapsedGPUs,
   procsCollapsed,
+  maximaCollapsed,
   pinned,
   onPin,
+  maxSel,
+  onMaxPick,
+  timeText,
   edge,
   onZoom,
 }: HistoryBlockProps) {
@@ -65,21 +79,12 @@ export const HistoryBlock = memo(function HistoryBlock({
     [info.host],
   );
   const onToggleProcs = useCallback((c: boolean) => void setProcessesCollapsed(info.host, c), [info.host]);
+  const onToggleMaxima = useCallback((c: boolean) => void setMaximaCollapsed(info.host, c), [info.host]);
+  const maxima = useMaxima(info.path);
 
   const result = useCurveFeed(info.path, anyExpanded, from, to, chartWidth, historyFields, queryRecording);
 
-  // 固定時刻離開顯示範圍時, 文字讀數另查詢以固定時刻為中心的同寬範圍.
-  const pinOutside = pinned !== null && (pinned < from || pinned > to);
-  const half = (to - from) / 2;
-  const pinResult = useCurveFeed(
-    info.path,
-    anyExpanded && pinOutside,
-    pinOutside ? pinned - half : from,
-    pinOutside ? pinned + half : to,
-    chartWidth,
-    historyFields,
-    queryRecording,
-  );
+  const sample = useSampleAt(info.path, pinned);
 
   // 記錄檔起訖之外的時段沒有資料, 以無資料時段標示.
   const outside = useMemo((): ChartGap[] => {
@@ -114,19 +119,55 @@ export const HistoryBlock = memo(function HistoryBlock({
     return m;
   }, [result, gpus, curves, units, t]);
 
+  // 選取最大值時, 該 GPU 的曲線圖頂端標出該欄位的所有出現處, 圖例最後加一項說明.
+  const selMax = maxSel ? findMax(maxima, maxSel.gpu, maxSel.field) : undefined;
+  const marks = useMemo((): ChartMarks | null => (selMax ? { runs: selMax.runs, color: "--text" } : null), [selMax]);
+  const selLegend = maxSel ? maxColumns.find((c) => c.field === maxSel.field)?.legend : undefined;
+  const markLegend = useMemo(
+    (): ChartLegendExtra | null =>
+      selMax && selLegend ? { key: "max-marks", label: t("history.maxMarks", { name: t(selLegend) }), color: "--text" } : null,
+    [selMax, selLegend, t],
+  );
+
+  // 有固定時刻且滑鼠不在曲線圖上時, 讀數取固定時刻的取樣; 查得之前維持前一個畫面的讀數.
   const readAt = hover ?? pinned ?? to;
-  const readResult = hover === null && pinOutside ? pinResult : result;
+  const fromSample = hover === null && pinned !== null;
+  const sampleReady = sample !== undefined && sample.path === info.path && sample.t === pinned;
+  const shown = useRef(new Map<number, LiveGPU | undefined>());
+  const readout = (gpuID: number): LiveGPU | undefined => {
+    let v: LiveGPU | undefined;
+    if (!fromSample) {
+      v = liveAt(result, gpuID, readAt);
+    } else if (sampleReady && sample) {
+      v = sampleGPU(sample.sample, gpuID);
+    } else {
+      v = shown.current.get(gpuID);
+    }
+    shown.current.set(gpuID, v);
+    return v;
+  };
   const pinHint = t(pinned === null ? "history.pinHint" : "history.repinHint");
   const procs = useProcessesAt(info.path, readAt);
 
   return (
     <>
       {gpus.length === 0 && <div className="card card-note">{t("history.noGpu")}</div>}
+      {gpus.length > 0 && (
+        <MaximaCard
+          gpus={gpus}
+          maxima={maxima}
+          sel={maxSel}
+          collapsed={maximaCollapsed}
+          onToggle={onToggleMaxima}
+          onPick={onMaxPick}
+          timeText={timeText}
+        />
+      )}
       {gpus.map((g) => (
         <GpuRow
           key={g.id}
           device={g}
-          gpu={liveAt(readResult, g.id, readAt)}
+          gpu={readout(g.id)}
           collapsed={collapsed.includes(g.id)}
           onToggle={onToggle}
           from={from}
@@ -140,6 +181,8 @@ export const HistoryBlock = memo(function HistoryBlock({
           pinHint={pinHint}
           edge={edge}
           onZoom={onZoom}
+          marks={maxSel?.gpu === g.id ? marks : null}
+          markLegend={maxSel?.gpu === g.id ? markLegend : null}
         />
       ))}
       {gpus.length > 0 && (

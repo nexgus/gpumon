@@ -1,4 +1,4 @@
-import type { Field, LiveGPU, QueryResult, SeriesData } from "../api/types";
+import type { Field, LiveGPU, QueryResult, RecordedSample, SeriesData } from "../api/types";
 
 // historyFields 為歷史畫面查詢的欄位. 文字讀數顯示全部數值, 與曲線選單的選擇無關,
 // 故一律查詢讀數用到的七個欄位.
@@ -61,6 +61,32 @@ export function liveAt(res: QueryResult | null, gpuID: number, t: number): LiveG
     clock_gpu: rounded(f.clock_gpu, best),
     clock_mem: rounded(f.clock_mem, best),
     fan: rounded(f.fan, best),
+    enc: null,
+    dec: null,
+    util_computed: false,
+  };
+}
+
+function round(v: number | null | undefined): number | null {
+  return v === null || v === undefined ? null : Math.round(v);
+}
+
+// sampleGPU 回傳一筆取樣中某張 GPU 的數值, 供文字讀數使用; 取樣為 null 或其中沒有該 GPU
+// 時回傳 undefined, 讀數全部顯示 N/A.
+export function sampleGPU(s: RecordedSample | null, gpuID: number): LiveGPU | undefined {
+  const g = s?.gpus.find((x) => x.id === gpuID);
+  if (!g) {
+    return undefined;
+  }
+  return {
+    id: gpuID,
+    util: round(g.util),
+    mem_used: round(g.mem_used),
+    temp: round(g.temp),
+    power_w: round(g.power_w),
+    clock_gpu: round(g.clock_gpu),
+    clock_mem: round(g.clock_mem),
+    fan: round(g.fan),
     enc: null,
     dec: null,
     util_computed: false,

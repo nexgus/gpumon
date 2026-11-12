@@ -75,6 +75,9 @@ func TestRoundTrip(t *testing.T) {
 	must(s.SetProcsCollapsed("alice@10.0.0.5", true))
 	must(s.SetProcsCollapsed("gpu02", true))
 	must(s.SetProcsCollapsed("gpu02", false))
+	must(s.SetMaximaCollapsed("gpu02", true))
+	must(s.SetMaximaCollapsed("alice@10.0.0.5", true))
+	must(s.SetMaximaCollapsed("alice@10.0.0.5", false))
 
 	s2 := mustOpen(t, dir)
 	if !reflect.DeepEqual(s.Snapshot(), s2.Snapshot()) {
@@ -96,6 +99,9 @@ func TestRoundTrip(t *testing.T) {
 	}
 	if !s2.ProcsCollapsed("alice@10.0.0.5") || s2.ProcsCollapsed("gpu02") {
 		t.Errorf("procs %v", s2.Snapshot().CollapsedProcs)
+	}
+	if !s2.MaximaCollapsed("gpu02") || s2.MaximaCollapsed("alice@10.0.0.5") {
+		t.Errorf("maxima %v", s2.Snapshot().CollapsedMaxima)
 	}
 	if h.Port != 2222 || h.KeyFile != "~/.ssh/k" {
 		t.Errorf("host = %+v", h)
@@ -126,6 +132,8 @@ func TestHostLifecycleAndOrder(t *testing.T) {
 	s.SetGPUCollapsed("u@b", 3, true)
 	s.SetProcsCollapsed("u@b", true)
 	s.SetProcsCollapsed("u@c", true)
+	s.SetMaximaCollapsed("u@b", true)
+	s.SetMaximaCollapsed("u@c", true)
 	if err := s.UpdateHost("u@b", HostConn{Addr: "bb", User: "v", Port: 22}); err != nil {
 		t.Fatal(err)
 	}
@@ -138,6 +146,9 @@ func TestHostLifecycleAndOrder(t *testing.T) {
 	}
 	if !s.ProcsCollapsed("v@bb") || s.ProcsCollapsed("u@b") || !s.ProcsCollapsed("u@c") {
 		t.Errorf("procs collapse state not migrated on rename: %v", s.Snapshot().CollapsedProcs)
+	}
+	if !s.MaximaCollapsed("v@bb") || s.MaximaCollapsed("u@b") || !s.MaximaCollapsed("u@c") {
+		t.Errorf("maxima collapse state not migrated on rename: %v", s.Snapshot().CollapsedMaxima)
 	}
 	if !s.GPUCollapsed("v@bb", 3) || s.GPUCollapsed("u@b", 3) {
 		t.Errorf("collapse state not migrated on rename")
@@ -158,7 +169,8 @@ func TestHostLifecycleAndOrder(t *testing.T) {
 		t.Errorf("remove missing: %v", err)
 	}
 	s.RemoveHost("v@bb")
-	if len(s.Snapshot().CollapsedGPUs) != 0 || s.ProcsCollapsed("v@bb") || !s.ProcsCollapsed("u@c") {
+	if len(s.Snapshot().CollapsedGPUs) != 0 || s.ProcsCollapsed("v@bb") || !s.ProcsCollapsed("u@c") ||
+		s.MaximaCollapsed("v@bb") || !s.MaximaCollapsed("u@c") {
 		t.Errorf("collapse state not removed with host")
 	}
 	if err := s.AddHost(HostConn{Addr: "a", User: "u"}); err != nil {
@@ -269,6 +281,9 @@ func TestSetterRanges(t *testing.T) {
 	if err := s.SetProcsCollapsed("", true); err == nil {
 		t.Error("empty host id accepted")
 	}
+	if err := s.SetMaximaCollapsed("", true); err == nil {
+		t.Error("empty host id accepted for maxima")
+	}
 	if d := s.Snapshot(); d.MonitorSpanMS != 123_456 || d.HistorySpanMS != 30*86_400_000 || !d.HistoryAll {
 		t.Errorf("failed setters must not change state: %+v", d)
 	}
@@ -300,7 +315,8 @@ func TestLoadOutOfRangeAndInvalid(t *testing.T) {
 	    {"addr": "e"}
 	  ],
 	  "collapsed_gpus": {"u@a": [2, 1, 2, -4], "u@b": [], "x": [-1]},
-	  "collapsed_procs": ["u@a", "", "u@b", "u@a"]
+	  "collapsed_procs": ["u@a", "", "u@b", "u@a"],
+	  "collapsed_maxima": ["u@b", "", "u@b", "u@a"]
 	}`)
 	s := mustOpen(t, dir)
 	d := s.Snapshot()
@@ -331,6 +347,9 @@ func TestLoadOutOfRangeAndInvalid(t *testing.T) {
 	}
 	if !reflect.DeepEqual(d.CollapsedProcs, []string{"u@a", "u@b"}) {
 		t.Errorf("collapsed procs = %v", d.CollapsedProcs)
+	}
+	if !reflect.DeepEqual(d.CollapsedMaxima, []string{"u@b", "u@a"}) {
+		t.Errorf("collapsed maxima = %v", d.CollapsedMaxima)
 	}
 	if !reflect.DeepEqual(d.CollapsedGPUs, map[string][]int{"u@a": {1, 2}}) {
 		t.Errorf("collapsed = %v", d.CollapsedGPUs)
@@ -555,13 +574,16 @@ func TestSnapshotIsACopy(t *testing.T) {
 	s.AddHost(HostConn{Addr: "a"})
 	s.SetGPUCollapsed("a", 0, true)
 	s.SetProcsCollapsed("a", true)
+	s.SetMaximaCollapsed("a", true)
 	d := s.Snapshot()
 	d.Hosts[0].Addr = "zzz"
 	d.Curves[0] = CurveFan
 	d.CollapsedGPUs["a"][0] = 9
 	d.CollapsedProcs[0] = "zzz"
+	d.CollapsedMaxima[0] = "zzz"
 	d2 := s.Snapshot()
-	if d2.Hosts[0].Addr != "a" || d2.Curves[0] != CurveUtil || d2.CollapsedGPUs["a"][0] != 0 || d2.CollapsedProcs[0] != "a" {
+	if d2.Hosts[0].Addr != "a" || d2.Curves[0] != CurveUtil || d2.CollapsedGPUs["a"][0] != 0 || d2.CollapsedProcs[0] != "a" ||
+		d2.CollapsedMaxima[0] != "a" {
 		t.Error("snapshot aliases internal state")
 	}
 	hosts := s.Hosts()
@@ -803,5 +825,8 @@ func TestLoadProcSortAndFilter(t *testing.T) {
 	}
 	if s.ProcSort("u@a") != DefaultProcSort() {
 		t.Errorf("legacy sort = %+v", s.ProcSort("u@a"))
+	}
+	if d := s.Snapshot(); d.CollapsedMaxima == nil || len(d.CollapsedMaxima) != 0 {
+		t.Errorf("legacy maxima = %+v", d.CollapsedMaxima)
 	}
 }

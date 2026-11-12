@@ -266,6 +266,9 @@ type Data struct {
 	// CollapsedProcs 為程序卡片已收合的主機識別字串, 不含空字串與重複.
 	CollapsedProcs []string `json:"collapsed_procs"`
 
+	// CollapsedMaxima 為歷史畫面最大值卡片已收合的主機識別字串, 不含空字串與重複.
+	CollapsedMaxima []string `json:"collapsed_maxima"`
+
 	// ProcSorts 以主機識別字串為鍵, 值為程序卡片的排序方式; 預設排序方式不存放.
 	ProcSorts map[string]ProcSort `json:"proc_sorts"`
 
@@ -276,19 +279,20 @@ type Data struct {
 // Default 回傳預設設定.
 func Default() Data {
 	return Data{
-		Version:        CurrentVersion,
-		Window:         Window{Width: DefaultWindowWidth, Height: DefaultWindowHeight},
-		Appearance:     AppearanceSystem,
-		Language:       LanguageEnglish,
-		SizeUnits:      SizeUnitsBinary,
-		MonitorSpanMS:  DefaultSpanMS,
-		HistorySpanMS:  DefaultSpanMS,
-		Curves:         DefaultCurves(),
-		Hosts:          []Host{},
-		CollapsedGPUs:  map[string][]int{},
-		CollapsedProcs: []string{},
-		ProcSorts:      map[string]ProcSort{},
-		ProcFilters:    map[string]ProcFilter{},
+		Version:         CurrentVersion,
+		Window:          Window{Width: DefaultWindowWidth, Height: DefaultWindowHeight},
+		Appearance:      AppearanceSystem,
+		Language:        LanguageEnglish,
+		SizeUnits:       SizeUnitsBinary,
+		MonitorSpanMS:   DefaultSpanMS,
+		HistorySpanMS:   DefaultSpanMS,
+		Curves:          DefaultCurves(),
+		Hosts:           []Host{},
+		CollapsedGPUs:   map[string][]int{},
+		CollapsedProcs:  []string{},
+		CollapsedMaxima: []string{},
+		ProcSorts:       map[string]ProcSort{},
+		ProcFilters:     map[string]ProcFilter{},
 	}
 }
 
@@ -301,6 +305,7 @@ func (d Data) clone() Data {
 		c.CollapsedGPUs[k] = append([]int{}, v...)
 	}
 	c.CollapsedProcs = append([]string{}, d.CollapsedProcs...)
+	c.CollapsedMaxima = append([]string{}, d.CollapsedMaxima...)
 	c.ProcSorts = make(map[string]ProcSort, len(d.ProcSorts))
 	for k, v := range d.ProcSorts {
 		c.ProcSorts[k] = v
@@ -400,6 +405,16 @@ func (d *Data) sanitize() {
 		}
 	}
 	d.CollapsedProcs = procs
+
+	maxima := []string{}
+	seenMax := map[string]bool{}
+	for _, id := range d.CollapsedMaxima {
+		if id != "" && !seenMax[id] {
+			seenMax[id] = true
+			maxima = append(maxima, id)
+		}
+	}
+	d.CollapsedMaxima = maxima
 
 	// 排序方式的欄位或方向不合法時分別改用預設值, 結果為預設排序方式者不存放.
 	sorts := map[string]ProcSort{}

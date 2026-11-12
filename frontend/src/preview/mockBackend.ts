@@ -13,6 +13,9 @@ import type {
   Live,
   ProcColumn,
   RecordedProcesses,
+  RecordedSample,
+  RecordingMaxima,
+  FieldMax,
   RecordingGroup,
   RecordingInfo,
   SkippedRecording,
@@ -170,6 +173,7 @@ const settings: SettingsData = {
   curves: (params.get("curves")?.split(",") as SettingsData["curves"]) ?? ["util", "mem"],
   collapsed_gpus: params.get("collapse") === "1" ? { "sweetener@10.90.20.55": [2] } : {},
   collapsed_procs: params.get("pcollapse") === "1" ? ["sweetener@10.90.20.55"] : [],
+  collapsed_maxima: params.get("mcollapse") === "1" ? ["sweetener@10.90.20.55"] : [],
   // psort 為 <欄位>-<方向>, 例如 mem-desc; pfilter=1 設定 USER 與 COMMAND 兩項條件,
   // pfilter=none 設定沒有任何程序符合的條件. 皆套用於主要主機.
   proc_sorts: params.get("psort")
@@ -511,16 +515,87 @@ function recordingInfo(r: MockRecording): RecordingInfo {
   };
 }
 
-function recordingQuery(r: MockRecording, from: number, to: number, width: number, fields: Field[]): QueryResult {
-  const h = hostOfRecording(r);
-  const step = Math.max(1e6, Math.ceil((r.end - r.start) / 30000 / 1e6) * 1e6);
+// recordingStep 為假記錄檔的取樣間隔 (微秒), 使每個記錄檔約有 30000 筆取樣.
+function recordingStep(r: MockRecording): number {
+  return Math.max(1e6, Math.ceil((r.end - r.start) / 30000 / 1e6) * 1e6);
+}
+
+function recordingTimes(r: MockRecording, from: number, to: number): number[] {
+  const step = recordingStep(r);
   const times: number[] = [];
   for (let t = Math.ceil(Math.max(from, r.start) / step) * step; t <= Math.min(to, r.end); t += step) {
     if (!r.gaps.some((g) => t > g.start && t < g.end)) {
       times.push(t);
     }
   }
-  return query(h, from, to, width, fields, false, times, r.gaps);
+  return times;
+}
+
+function recordingQuery(r: MockRecording, from: number, to: number, width: number, fields: Field[]): QueryResult {
+  return query(hostOfRecording(r), from, to, width, fields, false, recordingTimes(r, from, to), r.gaps);
+}
+
+const maximaFields: Field[] = ["util", "mem_used", "temp", "fan", "power_w", "clock_gpu", "clock_mem"];
+
+// recordingMaxima 依 internal/history 的規則求整個記錄檔的最大值: 出現處為數值等於最大值
+// 的連續取樣, 中間隔著無資料時段即分為兩處.
+function recordingMaxima(r: MockRecording): RecordingMaxima {
+  const h = hostOfRecording(r);
+  const times = recordingTimes(r, r.start, r.end);
+  const gpus = (h.devices?.gpus ?? []).map((g) => {
+    const fields: Partial<Record<Field, FieldMax>> = {};
+    for (const f of maximaFields) {
+      let m: FieldMax | null = null;
+      let prev = -1;
+      for (const t of times) {
+        const v = value(h, g, f, t);
+        const broken = prev >= 0 && r.gaps.some((x) => prev <= x.start && t >= x.end);
+        const last = m?.runs[m.runs.length - 1];
+        if (v === null) {
+          prev = -1;
+          continue;
+        }
+        if (!m || v > m.value) {
+          m = { value: v, runs: [[t, t]] };
+        } else if (v === m.value) {
+          if (last && last[1] === prev && !broken) {
+            last[1] = t;
+          } else {
+            m.runs.push([t, t]);
+          }
+        }
+        prev = t;
+      }
+      if (m) {
+        fields[f] = m;
+      }
+    }
+    return { id: g.id, fields };
+  });
+  return { gpus };
+}
+
+// recordingSample 回傳時刻不晚於 t 的最近一筆取樣, 規則與 internal/history 的 SampleAt 相同.
+function recordingSample(r: MockRecording, t: number): RecordedSample | null {
+  const step = recordingStep(r);
+  const at = Math.min(r.end, Math.floor(t / step) * step);
+  if (at < r.start || t - at > 2 * step || r.gaps.some((g) => at < g.end && t > g.start)) {
+    return null;
+  }
+  const h = hostOfRecording(r);
+  return {
+    time: at,
+    gpus: (h.devices?.gpus ?? []).map((g) => ({
+      id: g.id,
+      util: value(h, g, "util", at),
+      mem_used: value(h, g, "mem_used", at),
+      temp: value(h, g, "temp", at),
+      fan: value(h, g, "fan", at),
+      power_w: value(h, g, "power_w", at),
+      clock_gpu: value(h, g, "clock_gpu", at),
+      clock_mem: value(h, g, "clock_mem", at),
+    })),
+  };
 }
 
 function recordingProcesses(r: MockRecording, t: number): RecordedProcesses | null {
@@ -636,6 +711,12 @@ export const backend: Backend = {
   async processesAt(path, t) {
     return recordingProcesses(findRecording(path), t);
   },
+  async maxima(path) {
+    return recordingMaxima(findRecording(path));
+  },
+  async sampleAt(path, t) {
+    return recordingSample(findRecording(path), t);
+  },
   async getSettings() {
     return structuredClone(settings);
   },
@@ -659,6 +740,10 @@ export const backend: Backend = {
   async setProcessesCollapsed(hostID, collapsed) {
     const rest = (settings.collapsed_procs ?? []).filter((id) => id !== hostID);
     settings.collapsed_procs = collapsed ? [...rest, hostID].sort() : rest;
+  },
+  async setMaximaCollapsed(hostID, collapsed) {
+    const rest = (settings.collapsed_maxima ?? []).filter((id) => id !== hostID);
+    settings.collapsed_maxima = collapsed ? [...rest, hostID].sort() : rest;
   },
   async setProcessSort(hostID, sort) {
     const all = { ...(settings.proc_sorts ?? {}) };

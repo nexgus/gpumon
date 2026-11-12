@@ -43,6 +43,20 @@ export interface ChartData {
   gaps: ChartGap[];
 }
 
+// ChartMarks 為沿繪圖區頂端畫出的時段標記, 例如歷史畫面最大值的出現處. runs 的每個元素
+// 為一段的起訖時刻 (Unix 微秒); color 為顏色的 CSS 變數名稱.
+export interface ChartMarks {
+  runs: [number, number][];
+  color: string;
+}
+
+// ChartLegendExtra 為圖例最後附加的一項, 例如時段標記的說明.
+export interface ChartLegendExtra {
+  key: string;
+  label: string;
+  color: string;
+}
+
 export interface ChartProps {
   from: number;
   to: number;
@@ -65,6 +79,8 @@ export interface ChartProps {
   // onZoom 回報繪圖區上按住 Ctrl (macOS 另可按住 ⌘) 的滾輪或觸控板捏合. factor 為顯示範圍
   // 長度的倍數, 大於 1 為加長; at 為游標位置佔繪圖區寬度的比例. 省略時不攔截這些操作.
   onZoom?: (factor: number, at: number) => void;
+  // marks 為時段標記, 省略時不畫.
+  marks?: ChartMarks | null;
 }
 
 // ChartEdge 為曲線圖的橫向捲動介面. canLeft 與 canRight 表示該側還有資料可捲動.
@@ -107,6 +123,9 @@ const FLING_MIN_SPEED = 300;
 const ZOOM_WHEEL_UNIT = 100;
 const ZOOM_WHEEL_FACTOR = 1.25;
 const WHEEL_LINE = 16;
+// 時段標記的高度與最小寬度 (像素).
+const MARK_HEIGHT = 4;
+const MARK_MIN_WIDTH = 6;
 
 // WebKitGesture 為 macOS WKWebView 的觸控板捏合事件, scale 為兩指距離相對於開始時的比例.
 interface WebKitGesture extends UIEvent {
@@ -151,6 +170,7 @@ function draw(
   to: number,
   data: ChartData | null,
   series: ChartSeries[],
+  marks: ChartMarks | null | undefined,
 ): void {
   const dpr = window.devicePixelRatio || 1;
   const w = Math.max(1, Math.round(width * dpr));
@@ -267,6 +287,24 @@ function draw(
       ctx.stroke();
     }
   }
+
+  // 時段標記畫在曲線之上; 寬度不足最小寬度時以該段的中點為中心加寬, 不超出繪圖區.
+  if (marks && marks.runs.length > 0) {
+    ctx.fillStyle = cssVar(canvas, marks.color);
+    for (const [start, end] of marks.runs) {
+      if (end < from || start > to) {
+        continue;
+      }
+      let x0 = Math.max(0, xOf(start));
+      let x1 = Math.min(width, xOf(end));
+      if (x1 - x0 < MARK_MIN_WIDTH) {
+        const mid = (xOf(start) + xOf(end)) / 2;
+        x0 = Math.min(Math.max(0, mid - MARK_MIN_WIDTH / 2), Math.max(0, width - MARK_MIN_WIDTH));
+        x1 = Math.min(width, x0 + MARK_MIN_WIDTH);
+      }
+      ctx.fillRect(x0, 0, x1 - x0, MARK_HEIGHT);
+    }
+  }
 }
 
 // nearestIndex 回傳最接近時刻 t 且有任一曲線有值的點, 距離超過 maxDist 時回傳 -1.
@@ -312,7 +350,7 @@ function ticks(from: number, to: number, width: number): string[] {
 
 // ChartLegend 為曲線圖的圖例, 含各曲線的名稱與滿刻度說明. 圖例由呼叫端放置, 例如
 // GPU 卡片的標題列.
-export const ChartLegend = memo(function ChartLegend({ series }: { series: ChartSeries[] }) {
+export const ChartLegend = memo(function ChartLegend({ series, extra }: { series: ChartSeries[]; extra?: ChartLegendExtra | null }) {
   return (
     <div className="chart-legend">
       {series.map((s) => (
@@ -322,12 +360,18 @@ export const ChartLegend = memo(function ChartLegend({ series }: { series: Chart
           {s.scaleLabel && <span className="chart-legend-scale"> {s.scaleLabel}</span>}
         </span>
       ))}
+      {extra && (
+        <span key={extra.key} className="chart-legend-item">
+          <span className="chart-legend-swatch chart-legend-mark" style={{ background: `var(${extra.color})` }} />
+          {extra.label}
+        </span>
+      )}
     </div>
   );
 });
 
 // 曲線圖的高度由外層的版面決定, 繪圖區的寬與高皆隨外框改變而重繪.
-function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHover, pinned, onPin, pinHint, edge, onZoom }: ChartProps) {
+function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHover, pinned, onPin, pinHint, edge, onZoom, marks }: ChartProps) {
   const boxRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -531,9 +575,9 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, onHov
   useEffect(() => {
     const c = canvasRef.current;
     if (c && width > 0 && height > 0) {
-      draw(c, width, height, from, to, data, series);
+      draw(c, width, height, from, to, data, series, marks);
     }
-  }, [width, height, from, to, data, series, theme]);
+  }, [width, height, from, to, data, series, marks, theme]);
 
   const describe = useCallback(
     (x: number): Hover | null => {

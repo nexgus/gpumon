@@ -7,6 +7,7 @@ import type {
   Choices,
   ConnectError,
   Curve,
+  Field,
   HostConn,
   HostStatus,
   Language,
@@ -40,12 +41,22 @@ export interface OperationError {
 
 // HistoryState 為歷史畫面開啟中的記錄檔與顯示範圍的位置. path 為開啟中記錄檔的路徑,
 // null 表示沒有開啟中的記錄檔. left 為顯示範圍的左緣 (Unix 微秒), null 表示尚未決定,
-// 由歷史畫面取捲動範圍的最右端. pinned 為固定時刻 (Unix 微秒), null 表示未固定; 不存入
-// 設定檔.
+// 由歷史畫面取捲動範圍的最右端. pinned 為固定時刻 (Unix 微秒), null 表示未固定. maxSel
+// 為最大值卡片中選取的一格, null 表示未選取; 選取時 pinned 為其中一處的時刻, 清除或改設
+// 固定時刻時一併解除. pinned 與 maxSel 皆不存入設定檔.
 export interface HistoryState {
   path: string | null;
   left: number | null;
   pinned: number | null;
+  maxSel: MaxSelection | null;
+}
+
+// MaxSelection 為最大值卡片中選取的一格: GPU 編號與欄位, 以及固定時刻所在的出現處
+// (由 0 起算, 依時刻遞增).
+export interface MaxSelection {
+  gpu: number;
+  field: Field;
+  index: number;
 }
 
 export const hostsStore = new Store<HostStatus[]>([]);
@@ -53,7 +64,7 @@ export const liveStore = new Store<Record<string, Live>>({});
 export const settingsStore = new Store<SettingsData | null>(null);
 export const choicesStore = new Store<Choices | null>(null);
 export const uiStore = new Store<UIState>({ page: "monitor", selected: null });
-export const historyStore = new Store<HistoryState>({ path: null, left: null, pinned: null });
+export const historyStore = new Store<HistoryState>({ path: null, left: null, pinned: null, maxSel: null });
 
 // RecordingsListState 為記錄檔清單離開後仍保留的狀態, 只存在於程式執行期間, 不存入設定檔.
 // selected 為選取的檔案路徑, scrollTop 為離開清單時內容區的捲動位置.
@@ -75,7 +86,7 @@ export const quitStore = new Store<QuitRequest | null>(null);
 // 主區域離開歷史畫面即關閉開啟中的記錄檔, 一併清除其顯示位置與固定時刻.
 uiStore.subscribe(() => {
   if (uiStore.get().page !== "history" && historyStore.get().path !== null) {
-    historyStore.set({ path: null, left: null, pinned: null });
+    historyStore.set({ path: null, left: null, pinned: null, maxSel: null });
   }
 });
 
@@ -322,6 +333,17 @@ export async function setProcessesCollapsed(hostID: string, collapsed: boolean):
   await saveSetting("collapsed_procs", [...ids].sort(), () => backend.setProcessesCollapsed(hostID, collapsed));
 }
 
+// setMaximaCollapsed 記住一台主機在歷史畫面的最大值卡片是否收合.
+export async function setMaximaCollapsed(hostID: string, collapsed: boolean): Promise<void> {
+  const ids = new Set(settingsStore.get()?.collapsed_maxima ?? []);
+  if (collapsed) {
+    ids.add(hostID);
+  } else {
+    ids.delete(hostID);
+  }
+  await saveSetting("collapsed_maxima", [...ids].sort(), () => backend.setMaximaCollapsed(hostID, collapsed));
+}
+
 // defaultProcSort 為程序卡片的預設排序方式, 依 GPU 遞增.
 export const defaultProcSort: ProcSort = { column: "gpu", order: "asc" };
 
@@ -519,7 +541,7 @@ export function showRecordings(): void {
 // openRecording 開啟 path 的記錄檔並顯示歷史畫面, 同時把記錄檔清單的選取改為只有 path.
 export function openRecording(path: string): void {
   recordingsListStore.update((r) => ({ ...r, selected: new Set([path]) }));
-  historyStore.set({ path, left: null, pinned: null });
+  historyStore.set({ path, left: null, pinned: null, maxSel: null });
   showPage("history");
 }
 
@@ -527,9 +549,14 @@ export function setHistoryLeft(left: number): void {
   historyStore.update((h) => ({ ...h, left }));
 }
 
-// setHistoryPinned 設定歷史畫面的固定時刻, null 為清除.
+// setHistoryPinned 設定歷史畫面的固定時刻, null 為清除. 最大值卡片的選取隨之解除.
 export function setHistoryPinned(pinned: number | null): void {
-  historyStore.update((h) => (h.pinned === pinned ? h : { ...h, pinned }));
+  historyStore.update((h) => (h.pinned === pinned && h.maxSel === null ? h : { ...h, pinned, maxSel: null }));
+}
+
+// selectHistoryMax 選取最大值卡片的一格, 並把固定時刻設為所選出現處的時刻 t.
+export function selectHistoryMax(sel: MaxSelection, t: number): void {
+  historyStore.update((h) => ({ ...h, pinned: t, maxSel: sel }));
 }
 
 // reportOperationFailure 把某項操作失敗的原因顯示於錯誤視窗.

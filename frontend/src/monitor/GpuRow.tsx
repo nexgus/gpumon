@@ -1,6 +1,14 @@
 import { memo } from "react";
 import type { Device, LiveGPU, SizeUnits } from "../api/types";
-import { Chart, ChartLegend, type ChartData, type ChartEdge, type ChartSeries } from "../chart/Chart";
+import {
+  Chart,
+  ChartLegend,
+  type ChartData,
+  type ChartEdge,
+  type ChartLegendExtra,
+  type ChartMarks,
+  type ChartSeries,
+} from "../chart/Chart";
 import { ChevronDown, ChevronRight } from "../components/Icons";
 import { memGiga, memGigaKey } from "../format";
 import { useT, type Translator } from "../i18n";
@@ -118,6 +126,9 @@ export interface GpuRowProps {
   pinHint?: string;
   edge?: ChartEdge;
   onZoom?: (factor: number, at: number) => void;
+  // marks 為曲線圖頂端的時段標記, markLegend 為其圖例項; 歷史畫面選取最大值時傳入.
+  marks?: ChartMarks | null;
+  markLegend?: ChartLegendExtra | null;
 }
 
 // GpuRow 為一張 GPU 的卡片. 頂端的標題列左側為 GPU 名稱, 右側為曲線圖例; 其下左側為
@@ -136,7 +147,7 @@ export const GpuRow = memo(function GpuRow(p: GpuRowProps) {
     <section className="card gpu-card">
       <div className="gpu-head">
         <GpuTitle device={p.device} collapsed={false} onToggle={toggle} />
-        <ChartLegend series={p.series} />
+        <ChartLegend series={p.series} extra={p.markLegend} />
       </div>
       <div className="gpu-readouts">
         <Readouts device={p.device} gpu={p.gpu} />
@@ -156,6 +167,7 @@ export const GpuRow = memo(function GpuRow(p: GpuRowProps) {
           pinHint={p.pinHint}
           edge={p.edge}
           onZoom={p.onZoom}
+          marks={p.marks}
         />
       </div>
     </section>
