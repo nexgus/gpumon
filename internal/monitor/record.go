@@ -7,9 +7,6 @@ import (
 	"log/slog"
 	"math"
 	"slices"
-	"sort"
-	"strconv"
-	"strings"
 	"sync"
 	"unicode/utf8"
 
@@ -28,23 +25,18 @@ const maxMessageBytes = 1024
 // 查詢合併尚未存檔的取樣; 每次 flush 後清空 pending. flushMu 使查詢期間不進行
 // flush, 確保查詢所讀的檔案內容與 pending 不重疊也不缺漏.
 type recorder struct {
-	dataDir      string
-	log          *slog.Logger
-	procInterval int64
+	dataDir string
+	log     *slog.Logger
 
 	flushMu sync.RWMutex
 
 	mu      sync.Mutex
 	w       *recording.Writer
 	pending []recording.Record
-	// 最近一筆程序記錄的程序組成與時刻.
-	hasProc      bool
-	lastProcKey  string
-	lastProcTime int64
 }
 
-func newRecorder(dataDir string, procIntervalUS int64, log *slog.Logger) *recorder {
-	return &recorder{dataDir: dataDir, procInterval: procIntervalUS, log: log}
+func newRecorder(dataDir string, log *slog.Logger) *recorder {
+	return &recorder{dataDir: dataDir, log: log}
 }
 
 // connStart 為一次連線第一筆取樣時的資訊.
@@ -95,10 +87,9 @@ func (r *recorder) begin(cs connStart) {
 		return
 	}
 	r.w = w
-	r.hasProc = false
 }
 
-// addSample 加入一筆取樣與依時機而定的程序記錄, 回傳記錄檔所用的時刻; 沒有記錄檔
+// addSample 加入一筆取樣與一筆程序記錄, 回傳記錄檔所用的時刻; 沒有記錄檔
 // 時 ok 為假. procs 為各 GPU 的程序原文, 與 gpus 一一對應.
 func (r *recorder) addSample(ts float64, intervalMS int, gpus []protocol.GPUSample, procs []recording.GPUProcs) (t int64, ok bool) {
 	r.mu.Lock()
@@ -118,13 +109,8 @@ func (r *recorder) addSample(ts float64, intervalMS int, gpus []protocol.GPUSamp
 	r.pending = append(r.pending, recording.Record{
 		Kind: recording.KindSample, Time: t, IntervalMS: clampU16(intervalMS), GPUs: gpuValues(r.w.GPUIDs(), rs),
 	})
-	key := procComposition(procs)
-	if !r.hasProc || key != r.lastProcKey || t-r.lastProcTime >= r.procInterval {
-		if err := r.w.AddProcesses(ts, procs); err != nil {
-			r.log.Warn("cannot record processes", "err", err)
-		} else {
-			r.hasProc, r.lastProcKey, r.lastProcTime = true, key, t
-		}
+	if err := r.w.AddProcesses(ts, procs); err != nil {
+		r.log.Warn("cannot record processes", "err", err)
 	}
 	return t, true
 }
@@ -177,7 +163,6 @@ func (r *recorder) closeLocked() {
 	}
 	r.w = nil
 	r.pending = nil
-	r.hasProc = false
 }
 
 // path 回傳寫入中的記錄檔路徑; 沒有時為空字串.
@@ -208,22 +193,6 @@ func (r *recorder) query(ctx context.Context, q history.Query) (*history.Result,
 	}
 	r.mu.Unlock()
 	return history.QueryRangePending(ctx, paths, pending, q)
-}
-
-// procComposition 回傳程序的組成, 即 GPU 編號與 PID 的集合, 以排序後的字串表示.
-func procComposition(procs []recording.GPUProcs) string {
-	var keys []string
-	for _, gp := range procs {
-		for _, raw := range gp.Procs {
-			var p struct {
-				PID int `json:"pid"`
-			}
-			json.Unmarshal(raw, &p)
-			keys = append(keys, strconv.Itoa(gp.GPU)+":"+strconv.Itoa(p.PID))
-		}
-	}
-	sort.Strings(keys)
-	return strings.Join(slices.Compact(keys), ",")
 }
 
 func i64(v *int) *int64 {

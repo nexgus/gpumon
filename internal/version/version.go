@@ -6,7 +6,7 @@ package version
 
 // VERSION 為程式版號, 形式為 x.y.z[-stage.N], stage 為 alpha, beta 或 rc,
 // 各數字皆不補零. build.sh 於建置前檢查此格式.
-const VERSION = "0.1.0"
+const VERSION = "0.2.0"
 
 // 以下變數於建置期注入.
 var (

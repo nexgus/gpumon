@@ -690,7 +690,7 @@ func TestProcSortAndFilter(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	must(s.SetProcSort("u@a", ProcSort{Column: ProcColumnMem, Order: SortDesc}))
+	must(s.SetProcSort("u@a", ProcSort{Column: ProcColumnUtil, Order: SortDesc}))
 	must(s.SetProcSort("u@b", ProcSort{Column: ProcColumnUser, Order: SortAsc}))
 	must(s.SetProcSort("u@b", DefaultProcSort()))
 	must(s.SetProcFilter("u@a", ProcFilter{GPUs: []int{2, 0, 2}, User: "  mlin ", Command: "python"}))
@@ -699,7 +699,7 @@ func TestProcSortAndFilter(t *testing.T) {
 
 	s2 := mustOpen(t, dir)
 	d := s2.Snapshot()
-	if !reflect.DeepEqual(d.ProcSorts, map[string]ProcSort{"u@a": {Column: ProcColumnMem, Order: SortDesc}}) {
+	if !reflect.DeepEqual(d.ProcSorts, map[string]ProcSort{"u@a": {Column: ProcColumnUtil, Order: SortDesc}}) {
 		t.Errorf("sorts = %+v", d.ProcSorts)
 	}
 	want := ProcFilter{GPUs: []int{0, 2}, User: "mlin", Command: "python"}
@@ -731,7 +731,7 @@ func TestProcSortAndFilter(t *testing.T) {
 	if err := s2.UpdateHost("u@a", HostConn{Addr: "aa", User: "v"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := s2.ProcSort("v@aa"); got != (ProcSort{Column: ProcColumnMem, Order: SortDesc}) {
+	if got := s2.ProcSort("v@aa"); got != (ProcSort{Column: ProcColumnUtil, Order: SortDesc}) {
 		t.Errorf("sort not migrated on rename: %+v", got)
 	}
 	if got := s2.ProcFilter("v@aa"); !reflect.DeepEqual(got, want) {

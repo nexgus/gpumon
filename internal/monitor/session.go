@@ -125,7 +125,7 @@ func (s *session) start() {
 	s.st, s.reason, s.retries, s.retryErr = StateConnecting, "", 0, ""
 	s.cancel = cancel
 	s.done = make(chan struct{})
-	s.rec = newRecorder(s.m.dataDir, s.m.timing.ProcessRecord.Microseconds(), s.m.log)
+	s.rec = newRecorder(s.m.dataDir, s.m.log)
 	s.live = Live{Host: s.id}
 	s.connStart = 0
 	done := s.done

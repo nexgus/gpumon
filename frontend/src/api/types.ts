@@ -101,7 +101,8 @@ export interface LiveProcess {
   pid: number;
   user: string;
   mem: number | null;
-  util: number | null;
+  // util 為該程序的 GPU 使用率 (百分比整數); 歷史記錄取不到時沒有此成員.
+  util?: number | null;
   cmd: string;
 }
 
@@ -258,8 +259,9 @@ export interface RecordedProcesses {
   procs: LiveProcess[];
 }
 
-// ProcColumn 為程序卡片可排序的欄位, 依序為 GPU, PID, USER, GPU MEM 與 COMMAND.
-export type ProcColumn = "gpu" | "pid" | "user" | "mem" | "command";
+// ProcColumn 為程序卡片可排序的欄位, 依序為 GPU, PID, USER, GPU UTIL,
+// GPU MEM 與 COMMAND.
+export type ProcColumn = "gpu" | "pid" | "user" | "util" | "mem" | "command";
 export type SortOrder = "asc" | "desc";
 
 export interface ProcSort {

@@ -91,3 +91,117 @@ func TestProcessesAtFileWithoutProcesses(t *testing.T) {
 }
 
 const math64Max = int64(1<<63 - 1)
+
+func procsRaw(elems ...string) []recording.GPUProcs {
+	var ps []json.RawMessage
+	for _, e := range elems {
+		ps = append(ps, json.RawMessage(e))
+	}
+	return []recording.GPUProcs{{GPU: 1, Procs: ps}}
+}
+
+func procUtils(t *testing.T, p string, at int64) map[int]*float64 {
+	t.Helper()
+	got, err := ProcessesAt(p, at)
+	if err != nil || got == nil {
+		t.Fatalf("at %d: %+v %v", at, got, err)
+	}
+	var arr []struct {
+		PID  int      `json:"pid"`
+		Util *float64 `json:"util"`
+		Cmd  string   `json:"cmd"`
+	}
+	if err := json.Unmarshal(got.Procs, &arr); err != nil {
+		t.Fatal(err)
+	}
+	out := map[int]*float64{}
+	for _, e := range arr {
+		out[e.PID] = e.Util
+	}
+	return out
+}
+
+func TestProcessesAtComputedUtil(t *testing.T) {
+	w := newRec(t, t.TempDir(), "a@b", 0, 1)
+	add(w, 0, 1000, 1, 1)
+	if err := w.AddProcesses(ts0+0, procsRaw(
+		`{"pid":1,"engines":{"render":0}}`,
+		`{"pid":2,"util":55}`,
+		`{"pid":3,"cycles":{"rcs":0},"total_cycles":{"rcs":0}}`,
+		`{"pid":4,"engines":{"render":500}}`)); err != nil {
+		t.Fatal(err)
+	}
+	add(w, 0.5, 1000, 1, 1)
+	if err := w.AddProcesses(ts0+0.5, procsRaw(
+		`{"pid":1,"engines":{"render":150000000},"cmd":"<x>&"}`,
+		`{"pid":2,"util":60}`,
+		`{"pid":3,"cycles":{"rcs":300},"total_cycles":{"rcs":1000}}`,
+		`{"pid":4,"engines":{"render":100}}`,
+		`{"pid":5,"engines":{"render":9}}`)); err != nil {
+		t.Fatal(err)
+	}
+	flush(t, w)
+	p := w.Path()
+
+	first := procUtils(t, p, twall)
+	if first[1] != nil || first[2] == nil || *first[2] != 55 || first[3] != nil {
+		t.Fatalf("first record has no previous: %+v", first)
+	}
+	u := procUtils(t, p, twall+sec)
+	if u[1] == nil || *u[1] != 30 {
+		t.Fatalf("busy time utilization: %+v", u)
+	}
+	if u[2] == nil || *u[2] != 60 {
+		t.Fatalf("existing util must stay: %+v", u)
+	}
+	if u[3] == nil || *u[3] != 30 {
+		t.Fatalf("cycles utilization: %+v", u)
+	}
+	if u[4] != nil {
+		t.Fatalf("decreased counter: %+v", u)
+	}
+	if u[5] != nil {
+		t.Fatalf("process missing in the previous record: %+v", u)
+	}
+	got, _ := ProcessesAt(p, twall+sec)
+	var arr []map[string]any
+	if err := json.Unmarshal(got.Procs, &arr); err != nil || arr[0]["cmd"] != "<x>&" || arr[0]["gpu"] != float64(1) {
+		t.Fatalf("other members: %s %v", got.Procs, err)
+	}
+}
+
+func TestProcessesAtDisconnectBlocksUtil(t *testing.T) {
+	w := newRec(t, t.TempDir(), "a@b", 0, 1)
+	add(w, 0, 1000, 1, 1)
+	w.AddProcesses(ts0, procsRaw(`{"pid":1,"engines":{"render":0}}`))
+	add(w, 1, 1000, 1, 1)
+	w.AddDisconnect(twall+2*sec, "lost")
+	w.BeginConnection(twall+3*sec, ts0+100)
+	add(w, 100, 1000, 1, 1)
+	w.AddProcesses(ts0+100, procsRaw(`{"pid":1,"engines":{"render":100000000}}`))
+	add(w, 100.5, 1000, 1, 1)
+	w.AddProcesses(ts0+100.5, procsRaw(`{"pid":1,"engines":{"render":200000000}}`))
+	flush(t, w)
+	p := w.Path()
+	if u := procUtils(t, p, twall+3*sec); u[1] != nil {
+		t.Fatalf("across disconnect: %+v", u)
+	}
+	if u := procUtils(t, p, twall+4*sec); u[1] == nil || *u[1] != 20 {
+		t.Fatalf("within one connection: %+v", u)
+	}
+}
+
+func TestProcessesAtSparseOldRecords(t *testing.T) {
+	w := newRec(t, t.TempDir(), "a@b", 0, 1)
+	add(w, 0, 1000, 1, 1)
+	w.AddProcesses(ts0, procsRaw(`{"pid":1,"engines":{"render":0}}`))
+	for k := 1; k < 60; k++ {
+		add(w, float64(k), 1000, 1, 1)
+	}
+	add(w, 60, 1000, 1, 1)
+	w.AddProcesses(ts0+60, procsRaw(`{"pid":1,"engines":{"render":6000000000}}`))
+	flush(t, w)
+	if u := procUtils(t, w.Path(), twall+61*sec); u[1] == nil || *u[1] != 10 {
+		t.Fatalf("sparse records: %+v", u)
+	}
+}

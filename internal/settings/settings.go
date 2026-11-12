@@ -97,11 +97,12 @@ func DefaultCurves() []Curve {
 // ProcColumn 為程序卡片可排序的欄位.
 type ProcColumn string
 
-// 程序卡片欄位的可用值, 依序為 GPU, PID, USER, GPU MEM 與 COMMAND.
+// 程序卡片欄位的可用值, 依序為 GPU, PID, USER, GPU UTIL, GPU MEM 與 COMMAND.
 const (
 	ProcColumnGPU     ProcColumn = "gpu"
 	ProcColumnPID     ProcColumn = "pid"
 	ProcColumnUser    ProcColumn = "user"
+	ProcColumnUtil    ProcColumn = "util"
 	ProcColumnMem     ProcColumn = "mem"
 	ProcColumnCommand ProcColumn = "command"
 )
@@ -165,7 +166,7 @@ func sortedIDs(ids []int) []int {
 
 func validProcColumn(v ProcColumn) bool {
 	switch v {
-	case ProcColumnGPU, ProcColumnPID, ProcColumnUser, ProcColumnMem, ProcColumnCommand:
+	case ProcColumnGPU, ProcColumnPID, ProcColumnUser, ProcColumnUtil, ProcColumnMem, ProcColumnCommand:
 		return true
 	}
 	return false

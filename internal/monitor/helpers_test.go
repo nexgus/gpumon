@@ -29,7 +29,6 @@ func testTiming() Timing {
 		ReconnectTimeout: 50 * time.Millisecond,
 		DevicesTimeout:   300 * time.Millisecond,
 		Flush:            time.Hour,
-		ProcessRecord:    60 * time.Second,
 	}
 }
 

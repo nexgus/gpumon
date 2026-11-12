@@ -616,7 +616,7 @@ func TestRecordingCreatedOnFirstSample(t *testing.T) {
 	if h := f.Header(); h.Host != "alice@gpu01" || h.TS0 != 1000 || h.TWall0 != e.clock.now().UnixMicro() {
 		t.Fatalf("header %+v", h)
 	}
-	if got, want := kinds(recs), []recording.Kind{kS, kP, kE, kS}; !reflect.DeepEqual(got, want) {
+	if got, want := kinds(recs), []recording.Kind{kS, kP, kE, kS, kP}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("records %v, want %v", got, want)
 	}
 	if recs[2].Text != "nvml timeout" {
@@ -697,16 +697,16 @@ func TestRecordingContinuesAfterReconnect(t *testing.T) {
 		t.Fatalf("files %v", files)
 	}
 	_, recs := readAll(t, path)
-	// 程序組成不變且未滿 60 秒, 重新連線後不另寫程序記錄.
-	if got, want := kinds(recs), []recording.Kind{kS, kP, kS, kD, kS}; !reflect.DeepEqual(got, want) {
+	// 每筆取樣皆附一筆程序記錄, 斷線記錄之後亦同.
+	if got, want := kinds(recs), []recording.Kind{kS, kP, kS, kP, kD, kS, kP}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("records %v, want %v", got, want)
 	}
-	d := recs[3]
+	d := recs[4]
 	if d.Time != tDisc || d.Text != "Connection lost: EOF" {
 		t.Fatalf("disconnect record %+v", d)
 	}
-	if recs[4].Time != t1 {
-		t.Fatalf("first sample after reconnecting at %d, want %d", recs[4].Time, t1)
+	if recs[5].Time != t1 {
+		t.Fatalf("first sample after reconnecting at %d, want %d", recs[5].Time, t1)
 	}
 }
 
@@ -761,7 +761,7 @@ func TestRecordingNewFileConditions(t *testing.T) {
 				t.Fatalf("no new recording: %q", second)
 			}
 			_, recs := readAll(t, first)
-			if got, want := kinds(recs), []recording.Kind{kS, kP, kS}; !reflect.DeepEqual(got, want) {
+			if got, want := kinds(recs), []recording.Kind{kS, kP, kS, kP}; !reflect.DeepEqual(got, want) {
 				t.Fatalf("first file records %v, want %v", got, want)
 			}
 			f, recs := readAll(t, second)
@@ -775,7 +775,7 @@ func TestRecordingNewFileConditions(t *testing.T) {
 	}
 }
 
-func TestProcessRecordTiming(t *testing.T) {
+func TestProcessRecordPerSample(t *testing.T) {
 	e := newEnv(t, testTiming())
 	id := e.addHost("alice", "gpu01")
 	ls := newLinks()
@@ -805,7 +805,7 @@ func TestProcessRecordTiming(t *testing.T) {
 			procTimes = append(procTimes, (r.Time-t0)/1000)
 		}
 	}
-	if want := []int64{0, 3000, 63500}; !reflect.DeepEqual(procTimes, want) {
+	if want := []int64{0, 1000, 2000, 3000, 4000, 63500, 64000}; !reflect.DeepEqual(procTimes, want) {
 		t.Fatalf("process records at %v ms, want %v", procTimes, want)
 	}
 }
@@ -994,7 +994,7 @@ func TestQueryAfterAutoReconnect(t *testing.T) {
 	// 記錄檔照舊接續寫入並留有斷線記錄.
 	e.m.recorderRefFor(id).flush()
 	_, recs := readAll(t, e.status(id).Recording)
-	if got, want := kinds(recs), []recording.Kind{kS, kP, kS, kS, kS, kS, kD, kS, kS}; !reflect.DeepEqual(got, want) {
+	if got, want := kinds(recs), []recording.Kind{kS, kP, kS, kP, kS, kP, kS, kP, kS, kP, kD, kS, kP, kS, kP}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("records %v, want %v", got, want)
 	}
 
@@ -1040,7 +1040,7 @@ func TestCloseSavesPendingSamples(t *testing.T) {
 	}
 	e.m.Close()
 	_, recs := readAll(t, path)
-	if got, want := kinds(recs), []recording.Kind{kS, kP, kS}; !reflect.DeepEqual(got, want) {
+	if got, want := kinds(recs), []recording.Kind{kS, kP, kS, kP}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("records after Close %v, want %v", got, want)
 	}
 	if !l.closed() {

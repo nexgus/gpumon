@@ -89,6 +89,7 @@
   "proc.gpu": "GPU",
   "proc.pid": "PID",
   "proc.user": "USER",
+  "proc.util": "GPU UTIL",
   "proc.mem": "GPU MEM",
   "proc.cmd": "COMMAND",
   "proc.filter": "Filter",

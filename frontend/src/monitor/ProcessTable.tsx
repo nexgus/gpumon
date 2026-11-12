@@ -13,6 +13,7 @@ const columns: { id: ProcColumn; label: MessageKey; num?: boolean; className?: s
   { id: "gpu", label: "proc.gpu" },
   { id: "pid", label: "proc.pid", num: true },
   { id: "user", label: "proc.user" },
+  { id: "util", label: "proc.util", num: true },
   { id: "mem", label: "proc.mem", num: true },
   { id: "command", label: "proc.cmd", className: "col-cmd" },
 ];
@@ -24,7 +25,7 @@ function compareText(a: string, b: string): number {
 }
 
 // sortProcs 回傳依 sort 排序後的新陣列. 數值相同時依序以 GPU 編號, PID 遞增決定
-// 先後; GPU MEM 為 N/A 的程序不論方向一律排在最後. USER 與 COMMAND 不分大小寫.
+// 先後; GPU UTIL 沒有數值或 GPU MEM 為 N/A 的程序不論方向一律排在最後. USER 與 COMMAND 不分大小寫.
 function sortProcs(procs: LiveProcess[], sort: ProcSort): LiveProcess[] {
   const dir = sort.order === "desc" ? -1 : 1;
   const primary = (a: LiveProcess, b: LiveProcess): number => {
@@ -37,6 +38,14 @@ function sortProcs(procs: LiveProcess[], sort: ProcSort): LiveProcess[] {
         return dir * compareText(a.user, b.user);
       case "command":
         return dir * compareText(a.cmd, b.cmd);
+      case "util": {
+        const x = a.util ?? null;
+        const y = b.util ?? null;
+        if (x === null || y === null) {
+          return x === y ? 0 : x === null ? 1 : -1;
+        }
+        return dir * (x - y);
+      }
       case "mem":
         if (a.mem === null || b.mem === null) {
           return a.mem === b.mem ? 0 : a.mem === null ? 1 : -1;
@@ -220,7 +229,7 @@ export const ProcessTable = memo(function ProcessTable({
           <tbody>
             {shown.length === 0 && (
               <tr>
-                <td colSpan={5} className="procs-empty">
+                <td colSpan={columns.length} className="procs-empty">
                   {procs.length === 0 ? (emptyText ?? t("monitor.noProcesses")) : t("proc.noMatch")}
                 </td>
               </tr>
@@ -238,6 +247,7 @@ export const ProcessTable = memo(function ProcessTable({
                       {p.user}
                     </span>
                   </td>
+                  <td className={`num${p.util == null ? " na" : ""}`}>{p.util == null ? "-" : `${p.util}%`}</td>
                   <td className={`num${mem ? "" : " na"}`}>
                     {mem ? t(mem.key, { value: mem.value }) : t("value.na")}
                   </td>

@@ -16,11 +16,13 @@ type nvidiaGPU struct {
 	lib  *nvmlLib
 	dev  nvmlDevice
 	info *procInfo
-	// lastProcUtil 為上一次查詢程序使用率的時間 (Unix 微秒), 作為下一次查詢
-	// nvmlDeviceGetProcessUtilization 的 lastSeenTimeStamp, 只取該時間之後的
-	// 取樣. 此值只是 NVML 查詢的參數, 不影響輸出的數值.
-	lastProcUtil uint64
 }
+
+// procUtilWindow 為查詢程序使用率時回溯的時間長度. 驅動程式每 200 ms 記錄一次,
+// 每次只記在一個程序名下, 回報的數值為各程序於回溯期間內的平均使用率. 回溯期間
+// 過短時, 數值為整張 GPU 的使用率而非該程序所佔的部分, 且未被記錄的程序沒有
+// 數值; 實測 5 秒時持續使用 GPU 的程序皆有數值.
+const procUtilWindow = 5 * time.Second
 
 // openNVIDIA 列出 NVML 偵測到的所有 GPU. 每張 GPU 的 PCI 代碼依 NVML 回報的
 // PCI 位址讀自 sysRoot 下的 bus/pci/devices/<位址>/.
@@ -225,19 +227,14 @@ func (g *nvidiaGPU) runningProcs(fn func(nvmlDevice, *uint32, *nvmlProcessInfo) 
 	return nil, false
 }
 
-// processUtil 回傳各程序於上次查詢之後的 SM 使用率, 同一程序有多筆取樣時取
-// 最新一筆. 首次查詢取最近 1 秒內的取樣.
+// processUtil 回傳各程序於最近 procUtilWindow 內的平均 SM 使用率, 同一程序有
+// 多筆取樣時取最新一筆. 此期間內沒有使用 GPU 的程序不在回傳的內容中.
 func (g *nvidiaGPU) processUtil() map[uint32]int {
 	fn := g.lib.getProcessUtil
 	if fn == nil {
 		return nil
 	}
-	now := uint64(time.Now().UnixMicro())
-	last := g.lastProcUtil
-	if last == 0 {
-		last = now - uint64(time.Second/time.Microsecond)
-	}
-	g.lastProcUtil = now
+	last := uint64(time.Now().Add(-procUtilWindow).UnixMicro())
 
 	var n uint32
 	r := fn(g.dev, nil, &n, last)

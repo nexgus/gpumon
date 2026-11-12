@@ -37,8 +37,6 @@ type Timing struct {
 	DevicesTimeout time.Duration
 	// Flush 為記錄檔批次附加的間隔.
 	Flush time.Duration
-	// ProcessRecord 為程序組成不變時寫入程序記錄的間隔.
-	ProcessRecord time.Duration
 }
 
 // IntervalMS 為 GUI 啟動遠端程式時以 --interval 傳入的取樣間隔, 固定不變; GUI
@@ -55,7 +53,6 @@ func DefaultTiming() Timing {
 		ReconnectTimeout: 5 * time.Second,
 		DevicesTimeout:   protocol.WatchdogTimeout,
 		Flush:            5 * time.Second,
-		ProcessRecord:    60 * time.Second,
 	}
 }
 
