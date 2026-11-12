@@ -86,6 +86,7 @@
   "unit.mib": "{value} MiB",
   "unit.gib": "{value} GiB",
 
+  "proc.pin": "Pin to top",
   "proc.gpu": "GPU",
   "proc.pid": "PID",
   "proc.user": "USER",
@@ -95,6 +96,7 @@
   "proc.filter": "Filter",
   "proc.removeFilter": "Remove filter",
   "proc.noMatch": "No processes match the filter.",
+  "proc.notRunning": "Not running",
 
   "filter.title": "Filter Processes",
   "filter.gpu": "GPU",

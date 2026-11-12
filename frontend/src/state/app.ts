@@ -363,6 +363,77 @@ export async function setProcessFilter(hostID: string, filter: ProcFilter): Prom
   await saveSetting("proc_filters", all, () => backend.setProcessFilter(hostID, f));
 }
 
+// PinnedProc 為程序卡片中一列置頂的程序, 以 GPU 編號, PID 與指令識別. user 為置頂期間
+// 最後一次取得的使用者名稱.
+export interface PinnedProc {
+  gpu: number;
+  pid: number;
+  cmd: string;
+  user: string;
+}
+
+// pinsStore 為各主機置頂的程序, 鍵為主機識別字串, 依置頂的先後排列. 只存在於程式執行
+// 期間, 不存入設定檔; 監看畫面與歷史畫面共用.
+export const pinsStore = new Store<Record<string, PinnedProc[]>>({});
+
+// samePinned 回傳 a 與 b 是否為同一列: GPU 編號, PID 與指令皆相同.
+export function samePinned(a: { gpu: number; pid: number; cmd: string }, b: { gpu: number; pid: number; cmd: string }): boolean {
+  return a.gpu === b.gpu && a.pid === b.pid && a.cmd === b.cmd;
+}
+
+// setPinned 把一台主機的一列程序置頂或解除置頂.
+export function setPinned(hostID: string, p: PinnedProc, pinned: boolean): void {
+  pinsStore.update((all) => {
+    const list = all[hostID] ?? [];
+    const rest = list.filter((x) => !samePinned(x, p));
+    const next = pinned ? [...rest, { gpu: p.gpu, pid: p.pid, cmd: p.cmd, user: p.user }] : rest;
+    if (next.length === list.length && !pinned) {
+      return all;
+    }
+    const out = { ...all };
+    if (next.length > 0) {
+      out[hostID] = next;
+    } else {
+      delete out[hostID];
+    }
+    return out;
+  });
+}
+
+// refreshPinnedUsers 以 procs 中取得的使用者名稱更新該主機置頂的列; 沒有改變時不更新.
+export function refreshPinnedUsers(hostID: string, procs: { gpu: number; pid: number; cmd: string; user: string }[]): void {
+  const list = pinsStore.get()[hostID];
+  if (!list) {
+    return;
+  }
+  let changed = false;
+  const next = list.map((x) => {
+    const p = procs.find((q) => samePinned(q, x));
+    if (p && p.user !== x.user) {
+      changed = true;
+      return { ...x, user: p.user };
+    }
+    return x;
+  });
+  if (changed) {
+    pinsStore.update((all) => ({ ...all, [hostID]: next }));
+  }
+}
+
+// movePins 把置頂由主機識別 from 轉移至 to; to 為 null 時清除.
+function movePins(from: string, to: string | null): void {
+  const all = pinsStore.get();
+  if (!(from in all)) {
+    return;
+  }
+  const out = { ...all };
+  if (to !== null) {
+    out[to] = all[from];
+  }
+  delete out[from];
+  pinsStore.set(out);
+}
+
 // 以下為主機的操作.
 
 export async function addHost(conn: HostConn): Promise<HostStatus> {
@@ -382,7 +453,8 @@ export async function updateHost(id: string, conn: HostConn): Promise<HostStatus
     });
     uiStore.update((u) => ({ ...u, selected: u.selected === id ? st.id : u.selected }));
     // 收合狀態與程序卡片的排序方式及過濾條件由後端隨主機的識別轉移, 重新讀取設定以
-    // 取得新的鍵.
+    // 取得新的鍵. 置頂不存入設定檔, 於此轉移.
+    movePins(id, st.id);
     void refreshSettings();
   }
   return st;
@@ -408,6 +480,7 @@ export async function removeHost(id: string): Promise<void> {
     ...u,
     selected: u.selected === id ? (rest[Math.min(at, rest.length - 1)]?.id ?? null) : u.selected,
   }));
+  movePins(id, null);
   void refreshSettings();
 }
 

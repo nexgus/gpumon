@@ -12,13 +12,14 @@
 //   select=all|<記錄檔清單由上而下的列號, 以逗號分隔, 自 0 起> (選取), openrec=1 (按 Open,
 //   顯示歷史畫面), confirmdelete=1 (按 Delete, 顯示確認視窗), dialog=quit (結束確認視窗, count=<主機數>, 預設 2),
 //   window=about (關於視窗, 以 600 x 600 的視窗檢視; tab=about|licenses,
-//   platform=windows 顯示 Windows 的資訊, jump=<n> 點選第三方授權分頁表中第 n 個授權種類).
+//   platform=windows 顯示 Windows 的資訊, jump=<n> 點選第三方授權分頁表中第 n 個授權種類),
+//   pins=1 (第一台主機的程序卡片預先置頂兩列, 其中一列為不在程序清單中的程序).
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "../App";
 import { startAbout } from "../about/start";
 import { loadFonts } from "../fonts";
-import { init } from "../state/app";
+import { init, pinsStore } from "../state/app";
 import { mock } from "./mockBackend";
 import "../styles/theme.css";
 import "../styles/app.css";
@@ -225,6 +226,19 @@ if (params.get("window") === "about") {
   });
 } else {
   init().finally(() => {
+    if (params.get("pins") === "1") {
+      pinsStore.set({
+        "sweetener@10.90.20.55": [
+          {
+            gpu: 1,
+            pid: 51902,
+            user: "sweetener",
+            cmd: "python eval.py --ckpt runs/1104/last.pt --data /mnt/datasets/imagenet-21k/train --workers 32 --batch-size 256 --precision bf16 --log-dir /home/sweetener/experiments/2026-11/vit_l_eval_run_0042",
+          },
+          { gpu: 0, pid: 47012, user: "mlin", cmd: "python preprocess.py --shards 64 --out /data/mlin/cache/tokens" },
+        ],
+      });
+    }
     root.render(
       <StrictMode>
         <App />

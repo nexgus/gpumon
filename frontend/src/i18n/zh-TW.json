@@ -74,6 +74,7 @@
   "proc.filter": "過濾",
   "proc.removeFilter": "移除過濾條件",
   "proc.noMatch": "沒有符合過濾條件的程序。",
+  "proc.notRunning": "未執行",
 
   "filter.title": "過濾程序",
   "filter.noGpu": "請至少勾選一張 GPU。",

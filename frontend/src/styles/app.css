@@ -850,7 +850,7 @@ button:disabled {
 
 /* 表格內容區隨卡片伸縮, 最小為 5.5 列高 (另加欄位名稱列), 程序超出時於此區上下捲動.
    基準高度為 0, 卡片高度因此只取決於內容區的剩餘高度, 不隨程序數量改變. 右側永遠
-   預留捲軸的寬度, 捲軸出現時欄位不移動. */
+   預留捲軸的寬度, 捲軸出現時欄位不移動. 指令欄的水平捲軸位於此區之下, 不計入 5.5 列. */
 .procs-scroll {
   --procs-row: 25px;
   flex: 1 1 0;
@@ -860,7 +860,7 @@ button:disabled {
   scrollbar-gutter: stable;
 }
 
-/* GPU, PID, USER, GPU MEM 四欄依內容決定寬度, COMMAND 欄取得其餘寬度. */
+/* Pin to top, GPU, PID, USER, GPU UTIL, GPU MEM 六欄依內容決定寬度, COMMAND 欄取得其餘寬度. */
 .procs-table {
   width: 100%;
   border-collapse: separate;
@@ -945,7 +945,8 @@ button:disabled {
   text-overflow: ellipsis;
 }
 
-/* max-width 為 0 時, 此欄的內容不參與欄寬計算, 過長的指令以省略號截斷. */
+/* max-width 為 0 時, 此欄的內容不參與欄寬計算. 過長的指令由程式依捲動位置只留下完整落在
+   欄內的字元, 並於被截斷的一端加上省略號, 此處不再由瀏覽器截斷. */
 .procs-table .col-cmd {
   width: 100%;
 }
@@ -953,8 +954,52 @@ button:disabled {
 .procs-table td.cmd {
   max-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
   color: var(--text-2);
+}
+
+/* Pin to top 欄的名稱不是排序按鍵, 不使用全大寫與字距, 字級與其他欄位名稱相同. */
+.procs-table th.col-pin {
+  font-family: var(--font-sans);
+  letter-spacing: normal;
+}
+
+.procs-table td.pin {
+  text-align: center;
+}
+
+.procs-table td.pin input {
+  margin: 0;
+  vertical-align: middle;
+  accent-color: var(--accent);
+}
+
+/* 置頂的列整列以淡強調色為底色, 隨表格上下捲動. */
+.procs-table tr.pinned td {
+  background: var(--accent-soft);
+}
+
+/* 置頂而不在程序清單中的列, 文字一律淡色, 用量兩欄合併顯示 "Not running". */
+.procs-table tr.missing td {
+  color: var(--text-3);
+}
+
+.procs-table td.not-running {
+  font-family: var(--font-sans);
+  text-align: center;
+}
+
+/* 指令欄的水平捲軸, 位置與寬度由程式對齊指令欄. 高度永遠預留, 指令皆可完整顯示時隱藏而
+   不移除, 捲軸出現或消失時各列與卡片高度不變. 系統使用浮動捲軸時捲軸不佔高度, 以
+   min-height 保留其顯示的空間. */
+.procs-hbar {
+  flex: none;
+  min-height: 12px;
+  overflow-x: scroll;
+  overflow-y: hidden;
+}
+
+.procs-hbar-fill {
+  height: 1px;
 }
 
 .procs-table td.procs-empty {
