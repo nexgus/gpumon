@@ -978,7 +978,7 @@ button:disabled {
   background: var(--accent-soft);
 }
 
-/* 置頂而不在程序清單中的列, 文字一律淡色, 用量兩欄合併顯示 "Not running". */
+/* 置頂而不在程序清單中的列, 文字一律淡色, 用量兩欄合併顯示程序不在清單中的說明. */
 .procs-table tr.missing td {
   color: var(--text-3);
 }

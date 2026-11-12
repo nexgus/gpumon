@@ -36,6 +36,7 @@
   "monitor.processes": "程序",
   "monitor.processesLast": "程序（最後收到的時刻 {time}）",
   "monitor.noProcesses": "沒有程序正在使用 GPU。",
+  "monitor.processExited": "程序已結束",
   "monitor.gpuChart": "GPU {id} 的曲線圖",
 
   "zoom.group": "縮放",
@@ -74,7 +75,6 @@
   "proc.filter": "過濾",
   "proc.removeFilter": "移除過濾條件",
   "proc.noMatch": "沒有符合過濾條件的程序。",
-  "proc.notRunning": "未執行",
 
   "filter.title": "過濾程序",
   "filter.noGpu": "請至少勾選一張 GPU。",
@@ -183,6 +183,7 @@
   "history.processesAt": "{time} 的程序",
   "history.noProcessRecord": "程序（{time} 之前沒有程序記錄）",
   "history.noProcesses": "當時沒有程序使用 GPU。",
+  "history.processAbsent": "程序此時不存在",
   "history.readFailed": "無法讀取此記錄檔。",
   "history.loading": "正在讀取記錄檔。",
   "history.noGpu": "此記錄檔沒有 GPU。",

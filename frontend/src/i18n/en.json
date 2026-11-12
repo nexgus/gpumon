@@ -38,6 +38,7 @@
   "monitor.processes": "Processes",
   "monitor.processesLast": "Processes (last received {time})",
   "monitor.noProcesses": "No processes are using the GPUs.",
+  "monitor.processExited": "Process exited",
   "monitor.gpu": "GPU {id}",
   "monitor.gpuChart": "GPU {id} history",
 
@@ -96,7 +97,6 @@
   "proc.filter": "Filter",
   "proc.removeFilter": "Remove filter",
   "proc.noMatch": "No processes match the filter.",
-  "proc.notRunning": "Not running",
 
   "filter.title": "Filter Processes",
   "filter.gpu": "GPU",
@@ -206,6 +206,7 @@
   "history.processesAt": "Processes at {time}",
   "history.noProcessRecord": "Processes (no record at or before {time})",
   "history.noProcesses": "No processes were using the GPUs.",
+  "history.processAbsent": "Process not present",
   "history.readFailed": "Cannot read this recording.",
   "history.loading": "Loading the recording.",
   "history.noGpu": "This recording has no GPU.",

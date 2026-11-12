@@ -233,10 +233,11 @@ const wheelLine = 16;
 
 // ProcessTable 為一台主機的程序卡片. hostID 為排序方式, 過濾條件與置頂所屬主機的識別字串,
 // gpus 為過濾視窗列出的 GPU. title 由呼叫端提供, 例如重新連線中時附上最後收到的
-// 時刻. emptyText 為沒有程序時的說明, 省略時用監看畫面的說明. 點選標題切換收合,
+// 時刻. emptyText 為沒有程序時的說明, missingText 為置頂的程序不在 procs 中時的說明,
+// 兩者省略時皆用監看畫面的說明. 點選標題切換收合,
 // 收合後只留標題列, 標題列的過濾條件標籤與 "Filter" 按鍵照常可用. 按下欄位名稱
 // 依該欄排序, 再按一次反轉方向. 第一欄的勾選框把該列置頂, 置頂的列排在最前; 置頂的
-// 程序不在 procs 中時, 該列仍以記下的內容顯示 "Not running". 表格內容區隨卡片伸縮,
+// 程序不在 procs 中時, 該列仍以記下的內容顯示 missingText. 表格內容區隨卡片伸縮,
 // 最小為 5.5 列高, 列數超出時於卡片內上下捲動. 指令超出欄寬時只有指令欄左右捲動,
 // 各列共用同一個捲動位置, 捲軸位於指令欄的正下方. 監看畫面與歷史畫面共用.
 export const ProcessTable = memo(function ProcessTable({
@@ -245,6 +246,7 @@ export const ProcessTable = memo(function ProcessTable({
   title,
   procs,
   emptyText,
+  missingText,
   collapsed,
   onToggle,
 }: {
@@ -253,6 +255,7 @@ export const ProcessTable = memo(function ProcessTable({
   title: string;
   procs: LiveProcess[];
   emptyText?: string;
+  missingText?: string;
   collapsed: boolean;
   onToggle: (collapsed: boolean) => void;
 }) {
@@ -528,7 +531,7 @@ export const ProcessTable = memo(function ProcessTable({
                   </td>
                   {p.missing ? (
                     <td colSpan={2} className="not-running">
-                      {t("proc.notRunning")}
+                      {missingText ?? t("monitor.processExited")}
                     </td>
                   ) : (
                     <>

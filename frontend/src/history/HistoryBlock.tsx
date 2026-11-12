@@ -155,6 +155,7 @@ export const HistoryBlock = memo(function HistoryBlock({
           }
           procs={procs?.procs ?? noProcs}
           emptyText={t("history.noProcesses")}
+          missingText={t("history.processAbsent")}
           collapsed={procsCollapsed}
           onToggle={onToggleProcs}
         />
