@@ -754,9 +754,12 @@ button:disabled {
   color: var(--text-3);
 }
 
-/* 程序卡片. */
+/* 程序卡片. 展開時取得內容區中 GPU 卡片下方剩餘的高度, 卡片底緣貼齊內容區底部. */
 .procs {
   padding: 8px 14px 12px;
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
 }
 
 /* 標題列由左至右為收合按鍵, 過濾條件標籤與 "Filter" 按鍵; 卡片收合時同一列照常顯示. */
@@ -832,11 +835,13 @@ button:disabled {
   color: var(--text-2);
 }
 
-/* 表格內容區固定為 5.5 列高, 程序超過 5 個時於此區上下捲動. 右側永遠預留捲軸的
-   寬度, 捲軸出現時欄位不移動. */
+/* 表格內容區隨卡片伸縮, 最小為 5.5 列高 (另加欄位名稱列), 程序超出時於此區上下捲動.
+   基準高度為 0, 卡片高度因此只取決於內容區的剩餘高度, 不隨程序數量改變. 右側永遠
+   預留捲軸的寬度, 捲軸出現時欄位不移動. */
 .procs-scroll {
   --procs-row: 25px;
-  height: calc(var(--procs-row) * 6.5);
+  flex: 1 1 0;
+  min-height: calc(var(--procs-row) * 6.5);
   overflow-x: hidden;
   overflow-y: auto;
   scrollbar-gutter: stable;
