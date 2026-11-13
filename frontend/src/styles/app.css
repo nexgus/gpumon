@@ -343,6 +343,18 @@ button:disabled {
   font-weight: 600;
 }
 
+.tab-count {
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  text-align: center;
+}
+
 /* 縮放控制項: 縮小按鍵與放大按鍵, 兩者以分隔線隔開. */
 .zoom {
   display: inline-flex;
@@ -404,11 +416,6 @@ button:disabled {
   gap: 8px;
   height: 28px;
   padding: 0 6px;
-}
-
-.curves-item input {
-  accent-color: var(--accent);
-  margin: 0;
 }
 
 .curves-item label {
@@ -1012,14 +1019,22 @@ button:disabled {
 }
 
 .procs-table td.pin input {
-  margin: 0;
   vertical-align: middle;
-  accent-color: var(--accent);
 }
 
 /* 置頂的列整列以淡強調色為底色, 隨表格上下捲動. */
 .procs-table tr.pinned td {
   background: var(--accent-soft);
+}
+
+/* 程序列整列可點擊以切換置頂, 滑鼠移入時整列加深底色, 游標維持預設箭頭. 置頂的列以強調色加深,
+   未置頂的列以文字色淡淡疊上, 淺色與深色模式皆可辨識. */
+.procs-table tbody tr.row:hover td {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.procs-table tbody tr.row.pinned:hover td {
+  background: color-mix(in srgb, var(--accent) 24%, var(--surface));
 }
 
 /* 置頂而不在程序清單中的列, 文字一律淡色, 用量兩欄合併顯示程序不在清單中的說明. */
@@ -1294,10 +1309,6 @@ button:disabled {
 
 .filter-gpu input {
   flex: none;
-  width: 14px;
-  height: 14px;
-  margin: 0;
-  accent-color: var(--accent);
 }
 
 .filter-gpu .gpu-badge {
@@ -1406,7 +1417,38 @@ button:disabled {
   align-items: center;
   gap: 12px;
   min-height: 38px;
-  padding: 0 14px;
+  padding: 0 14px 0 0;
+}
+
+/* 方框的可點擊範圍, 由列的左緣延伸至文字之前, 高度為整列. 滑鼠移入時於方框周圍顯示圓角底色;
+   右側負邊距抵銷列的間距, 使範圍緊接文字. */
+.rec-check {
+  position: relative;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  margin-right: -12px;
+  padding: 0 12px 0 14px;
+}
+
+.rec-check::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  width: 28px;
+  height: 28px;
+  transform: translateY(-50%);
+  border-radius: 6px;
+  pointer-events: none;
+}
+
+.rec-check:hover::before {
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+.rec-check .check {
+  position: relative;
 }
 
 .rec-host {
@@ -1431,7 +1473,7 @@ button:disabled {
   align-items: center;
   gap: 12px;
   min-height: 34px;
-  padding: 0 14px;
+  padding: 0 14px 0 0;
   border-top: 1px solid var(--border);
   color: var(--text);
 }
@@ -1442,11 +1484,6 @@ button:disabled {
 
 .rec-row.muted {
   color: var(--text-3);
-}
-
-.rec-row input {
-  accent-color: var(--accent);
-  margin: 0;
 }
 
 .rec-label {
@@ -1635,4 +1672,55 @@ button:disabled {
   margin: 0;
   color: var(--text);
   overflow-wrap: anywhere;
+}
+
+/* 程式內所有方框共用的樣式, 自行繪製而不採用系統 WebView 的原生外觀. 勾選為強調色底加打勾,
+   部分選取 (indeterminate) 為強調色底加橫線; 打勾與橫線的顏色同 --accent-text, 資料 URI 無法引用
+   色彩變數, 故深色模式另定. */
+.check {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 4px;
+  background-color: var(--surface);
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.check:checked,
+.check:indeterminate {
+  border-color: var(--accent);
+  background-color: var(--accent);
+}
+
+.check:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.6 8.4l2.9 2.9 5.9-6' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-size: 100% 100%;
+}
+
+.check:indeterminate {
+  background-image: linear-gradient(#fff, #fff);
+  background-size: 8px 2px;
+}
+
+html.dark .check:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.6 8.4l2.9 2.9 5.9-6' fill='none' stroke='%230b1220' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+html.dark .check:indeterminate {
+  background-image: linear-gradient(#0b1220, #0b1220);
+}
+
+.check:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.check:disabled {
+  opacity: 0.5;
 }

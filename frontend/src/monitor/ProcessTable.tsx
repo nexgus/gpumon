@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 import type { Device, LiveProcess, ProcColumn, ProcFilter, ProcSort } from "../api/types";
 import { ChevronDown, ChevronRight, CloseIcon, FilterIcon, SortIcon } from "../components/Icons";
@@ -117,6 +117,9 @@ interface Row extends LiveProcess {
 
 const noPins: PinnedProc[] = [];
 
+// 方框的切換由所在的列處理 (含鍵盤操作時由方框送出的點擊事件), 方框本身不處理變更.
+const noop = () => {};
+
 function rowKey(p: { gpu: number; pid: number; cmd: string }): string {
   return `${p.gpu}\u0000${p.pid}\u0000${p.cmd}`;
 }
@@ -228,6 +231,9 @@ function sameGeo(a: Geo | null, b: Geo): boolean {
   return !!a && a.left === b.left && a.width === b.width && a.inner === b.inner && a.font === b.font;
 }
 
+// dragSlop 為按下與放開滑鼠之間的位移上限 (像素), 超過即視為拖曳.
+const dragSlop = 4;
+
 // wheelLine 為滾輪以行為單位時每行換算的像素.
 const wheelLine = 16;
 
@@ -236,7 +242,7 @@ const wheelLine = 16;
 // 時刻. emptyText 為沒有程序時的說明, missingText 為置頂的程序不在 procs 中時的說明,
 // 兩者省略時皆用監看畫面的說明. 點選標題切換收合,
 // 收合後只留標題列, 標題列的過濾條件標籤與 "Filter" 按鍵照常可用. 按下欄位名稱
-// 依該欄排序, 再按一次反轉方向. 第一欄的勾選框把該列置頂, 置頂的列排在最前; 置頂的
+// 依該欄排序, 再按一次反轉方向. 點擊列上任何位置 (含第一欄的方框) 切換該列的置頂, 置頂的列排在最前; 置頂的
 // 程序不在 procs 中時, 該列仍以記下的內容顯示 missingText. 表格內容區隨卡片伸縮,
 // 最小為 5.5 列高, 列數超出時於卡片內上下捲動. 指令超出欄寬時只有指令欄左右捲動,
 // 各列共用同一個捲動位置, 捲軸位於指令欄的正下方. 監看畫面與歷史畫面共用.
@@ -268,6 +274,17 @@ export const ProcessTable = memo(function ProcessTable({
   const shown = useMemo(() => buildRows(procs, pins, filter, sort), [procs, pins, filter, sort]);
 
   useEffect(() => refreshPinnedUsers(hostID, procs), [hostID, procs, pins]);
+
+  // 按下滑鼠時的位置; 放開時位移超過 dragSlop 像素視為拖曳反白文字, 不切換置頂.
+  const downRef = useRef<{ x: number; y: number } | null>(null);
+  const onRowClick = (p: Row, e: MouseEvent<HTMLTableRowElement>) => {
+    const down = downRef.current;
+    downRef.current = null;
+    if (down && e.detail > 0 && Math.hypot(e.clientX - down.x, e.clientY - down.y) > dragSlop) {
+      return;
+    }
+    setPinned(hostID, p, !p.pinned);
+  };
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const cmdHeadRef = useRef<HTMLTableCellElement>(null);
@@ -509,15 +526,23 @@ export const ProcessTable = memo(function ProcessTable({
             )}
             {shown.map((p, i) => {
               const mem = p.mem === null ? null : bytesUnit(p.mem, units);
-              const cls = [p.pinned ? "pinned" : "", p.missing ? "missing" : ""].filter(Boolean).join(" ");
+              const cls = ["row", p.pinned ? "pinned" : "", p.missing ? "missing" : ""].filter(Boolean).join(" ");
               return (
-                <tr key={p.key} className={cls || undefined}>
+                <tr
+                  key={p.key}
+                  className={cls}
+                  onMouseDown={(e) => {
+                    downRef.current = { x: e.clientX, y: e.clientY };
+                  }}
+                  onClick={(e) => onRowClick(p, e)}
+                >
                   <td className="pin">
                     <input
                       type="checkbox"
+                      className="check"
                       checked={p.pinned}
                       aria-label={t("proc.pin")}
-                      onChange={(e) => setPinned(hostID, p, e.target.checked)}
+                      onChange={noop}
                     />
                   </td>
                   <td>

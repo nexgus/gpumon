@@ -23,7 +23,6 @@
   "state.reconnectingReason": "重新連線中：{reason}",
   "state.disconnectedRetries": "未連線，重試 {max} 次皆失敗：{reason}",
 
-  "page.recordings": "記錄檔",
   "page.settings": "設定",
 
   "monitor.hostTabs": "主機",
@@ -167,7 +166,9 @@
   "recordings.fileOne": "1 個檔案",
   "recordings.fileMany": "{count} 個檔案",
   "recordings.summary": "{files}，{size}",
-  "recordings.selectAll": "全選",
+  "recordings.hostTabs": "主機",
+  "recordings.selectHost": "選取 {host} 的所有記錄檔",
+  "recordings.selectSkipped": "選取所有無法開啟的檔案",
   "recordings.open": "開啟",
   "recordings.deleteCount": "刪除（{count}）",
   "recordings.now": "現在",

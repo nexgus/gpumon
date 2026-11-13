@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type Ref } from "react";
 import { backend } from "../api/backend";
 import { serviceError } from "../api/errors";
 import type { RecordingFile, RecordingListing } from "../api/types";
 import { DeleteIcon } from "../components/Icons";
 import { formatDateRange, formatDateTime, formatDuration, formatSize } from "../format";
 import { useT, type Translator } from "../i18n";
+import { isMac } from "../platform";
 import { openRecording, recordingsListStore, reportOperationFailure, useSizeUnits } from "../state/app";
 import { useStore } from "../state/store";
 import { DeleteRecordingsDialog } from "../dialogs/DeleteRecordingsDialog";
@@ -25,10 +26,48 @@ function rangeText(f: RecordingFile, t: Translator): string {
   return formatDateRange(f.start, f.end);
 }
 
+// SelectState 為一組列的選取狀況, 對應方框的空白, 橫線, 打勾三種外觀.
+type SelectState = "none" | "some" | "all";
+
+function selectState(paths: string[], selected: ReadonlySet<string>): SelectState {
+  const n = paths.filter((p) => selected.has(p)).length;
+  return n === 0 ? "none" : n === paths.length ? "all" : "some";
+}
+
+const noop = () => {};
+
+// TriCheck 為三種外觀的方框; indeterminate 只能以 DOM 屬性設定. 變更由外層的點擊處理, 方框本身不處理.
+function TriCheck({ state, label, disabled }: { state: SelectState; label: string; disabled?: boolean }) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (ref.current) {
+      ref.current.indeterminate = state === "some";
+    }
+  });
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      className="check"
+      aria-label={label}
+      checked={state === "all"}
+      disabled={disabled}
+      onChange={noop}
+    />
+  );
+}
+
+// 按住 Shift 按下滑鼠時阻止預設的文字選取.
+function noShiftSelect(e: MouseEvent) {
+  if (e.shiftKey) {
+    e.preventDefault();
+  }
+}
+
 interface RowProps {
   selected: boolean;
-  onSelectOnly: () => void;
-  onToggle: () => void;
+  onRowClick: (e: MouseEvent) => void;
+  onBoxClick: (e: MouseEvent) => void;
   muted?: boolean;
   label: string;
   note?: string;
@@ -39,17 +78,20 @@ interface RowProps {
   openRef?: Ref<HTMLButtonElement>;
 }
 
-// Row 為清單的一列. 點選方框與 "開啟" 按鍵以外的位置只選取該列, 點選方框只切換該列的選取.
-function Row({ selected, onSelectOnly, onToggle, muted, label, note, duration, size, onOpen, openText, openRef }: RowProps) {
+// Row 為清單的一列. 點選方框範圍 (列的左緣至起訖時刻之前) 與 "開啟" 按鍵以外的位置選取該列,
+// 點選方框範圍切換該列的選取; 修飾鍵的語意由呼叫端處理.
+function Row({ selected, onRowClick, onBoxClick, muted, label, note, duration, size, onOpen, openText, openRef }: RowProps) {
   return (
-    <li className={`rec-row${selected ? " checked" : ""}${muted ? " muted" : ""}`} onClick={onSelectOnly}>
-      <input
-        type="checkbox"
-        aria-label={label}
-        checked={selected}
-        onClick={(e) => e.stopPropagation()}
-        onChange={onToggle}
-      />
+    <li className={`rec-row${selected ? " checked" : ""}${muted ? " muted" : ""}`} onMouseDown={noShiftSelect} onClick={onRowClick}>
+      <div
+        className="rec-check"
+        onClick={(e) => {
+          e.stopPropagation();
+          onBoxClick(e);
+        }}
+      >
+        <TriCheck state={selected ? "all" : "none"} label={label} />
+      </div>
       <span className="rec-label" title={label}>
         {label}
       </span>
@@ -73,24 +115,70 @@ function Row({ selected, onSelectOnly, onToggle, muted, label, note, duration, s
   );
 }
 
-function setSelected(fn: (sel: ReadonlySet<string>) => ReadonlySet<string>): void {
-  recordingsListStore.update((r) => ({ ...r, selected: fn(r.selected) }));
+// GroupCheck 為分組標題列左端的方框, 點擊該組全部已選則清除該組, 否則選取該組全部.
+function GroupCheck({
+  paths,
+  selected,
+  label,
+  onChange,
+}: {
+  paths: string[];
+  selected: ReadonlySet<string>;
+  label: string;
+  onChange: (fn: (sel: ReadonlySet<string>) => ReadonlySet<string>) => void;
+}) {
+  const state = selectState(paths, selected);
+  return (
+    <div
+      className="rec-check"
+      onClick={() =>
+        onChange((sel) => {
+          const next = new Set(sel);
+          for (const p of paths) {
+            if (state === "all") {
+              next.delete(p);
+            } else {
+              next.add(p);
+            }
+          }
+          return next;
+        })
+      }
+    >
+      <TriCheck state={state} label={label} />
+    </div>
+  );
 }
 
-// RecordingsPage 為記錄檔清單: 依主機分組, 每個檔案可個別開啟於歷史畫面, 亦可選取任意
-// 多個檔案刪除. 連線中的記錄檔可開啟, 不可刪除; 無法開啟的檔案列於清單末端, 不計入任何總計.
-// 選取與捲動位置於離開清單後保留, 再次進入時還原; 恰好只有一列選取且該列有 "開啟" 按鍵時,
-// 把鍵盤焦點移至該按鍵.
+// skippedTab 為 "無法開啟的檔案" 分頁的識別; 主機分頁的識別為 "h:" 加主機名稱.
+const skippedTab = "s";
+
+function hostTab(host: string): string {
+  return `h:${host}`;
+}
+
+function tabKeys(l: RecordingListing): string[] {
+  return [...l.hosts.map((g) => hostTab(g.host)), ...(l.skipped.length > 0 ? [skippedTab] : [])];
+}
+
+// RecordingsPage 為記錄檔清單: 以分頁切換主機, 一次只顯示並管理一台主機的檔案, 無法開啟的檔案
+// 列於最後一個分頁. 每個檔案可個別開啟於歷史畫面, 亦可選取任意多個檔案刪除; 選取, 範圍選取與
+// 刪除只作用於目前分頁. 連線中的記錄檔可開啟, 不可刪除.
+// 各分頁的選取, 目前分頁與捲動位置於離開清單後保留, 再次進入時還原; 目前分頁恰好只有一列選取
+// 且該列有 "開啟" 按鍵時, 把鍵盤焦點移至該按鍵.
 export function RecordingsPage() {
   const t = useT();
   const units = useSizeUnits();
   const [listing, setListing] = useState<RecordingListing | null>(null);
   const [failed, setFailed] = useState(false);
   const selected = useStore(recordingsListStore, (r) => r.selected);
+  const storedTab = useStore(recordingsListStore, (r) => r.tab);
   const [confirming, setConfirming] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
   const soleRef = useRef<HTMLButtonElement>(null);
   const restored = useRef(false);
+  // 範圍選取的起點列, 為最近一次未按 Shift 而點擊的列; 只保留於此元件存在期間.
+  const anchorRef = useRef<string | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -98,9 +186,11 @@ export function RecordingsPage() {
       setListing(l);
       setFailed(false);
       const all = new Set([...l.hosts.flatMap((g) => g.files.map((f) => f.path)), ...l.skipped.map((s) => s.path)]);
+      const keys = tabKeys(l);
       recordingsListStore.update((r) => ({
         ...r,
         selected: new Set([...r.selected].filter((p) => all.has(p))),
+        tab: r.tab !== null && keys.includes(r.tab) ? r.tab : (keys[0] ?? null),
       }));
     } catch {
       setFailed(true);
@@ -138,16 +228,42 @@ export function RecordingsPage() {
     }
   }, [listing]);
 
-  const files = useMemo(() => listing?.hosts.flatMap((g) => g.files) ?? [], [listing]);
   const skipped = listing?.skipped ?? [];
-  const totalSize = files.reduce((n, f) => n + f.size, 0);
-  const everyPath = useMemo(() => [...files.map((f) => f.path), ...skipped.map((s) => s.path)], [files, skipped]);
+  const keys = useMemo(() => (listing ? tabKeys(listing) : []), [listing]);
+  const tab = storedTab !== null && keys.includes(storedTab) ? storedTab : (keys[0] ?? null);
+  const curHost = listing?.hosts.find((g) => hostTab(g.host) === tab) ?? null;
+  const onSkipped = tab === skippedTab;
+  // 目前分頁的檔案, 由新到舊.
+  const curFiles = useMemo(() => (curHost ? [...curHost.files].reverse() : []), [curHost]);
+  const curPaths = useMemo(() => (onSkipped ? skipped.map((s) => s.path) : curFiles.map((f) => f.path)), [onSkipped, skipped, curFiles]);
 
-  // 恰好只有一列選取且該列有 "開啟" 按鍵時, 為該列的路徑.
-  const selectedPaths = everyPath.filter((p) => selected.has(p));
-  const solePath = selectedPaths.length === 1 && files.some((f) => f.path === selectedPaths[0]) ? selectedPaths[0] : null;
+  // setSelected 只改動目前分頁的選取, 其他分頁的選取不變.
+  const setSelected = (fn: (sel: ReadonlySet<string>) => ReadonlySet<string>) =>
+    recordingsListStore.update((r) => {
+      const cur = new Set(curPaths);
+      const next = fn(new Set([...r.selected].filter((p) => cur.has(p))));
+      return { ...r, selected: new Set([...[...r.selected].filter((p) => !cur.has(p)), ...[...next].filter((p) => cur.has(p))]) };
+    });
 
-  const deletable = [...files.filter((f) => selected.has(f.path) && !f.active), ...skipped.filter((s) => selected.has(s.path))];
+  const switchTab = (key: string) => {
+    anchorRef.current = null;
+    recordingsListStore.update((r) => ({ ...r, tab: key }));
+    if (contentRef.current) {
+      contentRef.current.scrollTop = 0;
+    }
+  };
+
+  // 各分頁選取的檔案數, 顯示於分頁文字之後.
+  const tabCount = (key: string): number => {
+    const paths = key === skippedTab ? skipped.map((s) => s.path) : (listing?.hosts.find((g) => hostTab(g.host) === key)?.files.map((f) => f.path) ?? []);
+    return paths.filter((p) => selected.has(p)).length;
+  };
+
+  // 目前分頁恰好只有一列選取且該列有 "開啟" 按鍵時, 為該列的路徑.
+  const selectedPaths = curPaths.filter((p) => selected.has(p));
+  const solePath = selectedPaths.length === 1 && !onSkipped ? selectedPaths[0] : null;
+
+  const deletable = onSkipped ? skipped.filter((s) => selected.has(s.path)) : curFiles.filter((f) => selected.has(f.path) && !f.active);
   const deletableSize = deletable.reduce((n, f) => n + f.size, 0);
 
   const toggle = (path: string, on: boolean) =>
@@ -161,20 +277,62 @@ export function RecordingsPage() {
       return next;
     });
 
-  const selectOnly = (path: string) => setSelected(() => new Set([path]));
+  // rangeTo 回傳起點列至 path 之間 (含兩端) 的所有列, 只在目前分頁的列中計算; 沒有起點列或起點列不在目前分頁時回傳 null.
+  const rangeTo = (path: string): string[] | null => {
+    const from = anchorRef.current === null ? -1 : curPaths.indexOf(anchorRef.current);
+    const to = curPaths.indexOf(path);
+    if (from < 0 || to < 0) {
+      return null;
+    }
+    return curPaths.slice(Math.min(from, to), Math.max(from, to) + 1);
+  };
 
-  const allSelected = everyPath.length > 0 && everyPath.every((p) => selected.has(p));
+  // clickRow 處理點擊列 (方框範圍以外): 一般點擊只選取該列, Ctrl (macOS 為 Command) 切換該列,
+  // Shift 以起點列至該列的範圍取代目前分頁的選取, 兩者並用則把範圍加入原有選取.
+  const clickRow = (path: string, e: MouseEvent) => {
+    const mod = isMac ? e.metaKey : e.ctrlKey;
+    const range = e.shiftKey ? rangeTo(path) : null;
+    if (range) {
+      setSelected((sel) => new Set(mod ? [...sel, ...range] : range));
+      return;
+    }
+    anchorRef.current = path;
+    if (mod) {
+      toggle(path, !selected.has(path));
+    } else {
+      setSelected(() => new Set([path]));
+    }
+  };
 
-  const deleteGroups = (listing?.hosts ?? [])
-    .map((g) => ({
-      host: g.host,
-      files: [...g.files]
-        .reverse()
-        .filter((f) => selected.has(f.path) && !f.active)
-        .map((f) => ({ path: f.path, range: rangeText(f, t), size: formatSize(f.size, units, t) })),
-    }))
-    .filter((g) => g.files.length > 0);
-  const deleteSkipped = skipped.filter((s) => selected.has(s.path)).map((s) => ({ path: s.path, size: formatSize(s.size, units, t) }));
+  // clickBox 處理點擊方框範圍: 切換該列; 按住 Shift 時把起點列至該列的範圍加入選取.
+  const clickBox = (path: string, e: MouseEvent) => {
+    const range = e.shiftKey ? rangeTo(path) : null;
+    if (range) {
+      setSelected((sel) => new Set([...sel, ...range]));
+      return;
+    }
+    anchorRef.current = path;
+    toggle(path, !selected.has(path));
+  };
+
+  // openFile 把該檔案所屬分頁 (即目前分頁) 的選取改為只有該列, 再開啟檔案.
+  const openFile = (path: string) => {
+    setSelected(() => new Set([path]));
+    openRecording(path);
+  };
+
+  const deleteGroups =
+    curHost && deletable.length > 0
+      ? [
+          {
+            host: curHost.host,
+            files: curFiles
+              .filter((f) => selected.has(f.path) && !f.active)
+              .map((f) => ({ path: f.path, range: rangeText(f, t), size: formatSize(f.size, units, t) })),
+          },
+        ]
+      : [];
+  const deleteSkipped = onSkipped ? skipped.filter((s) => selected.has(s.path)).map((s) => ({ path: s.path, size: formatSize(s.size, units, t) })) : [];
 
   const doDelete = async () => {
     setConfirming(false);
@@ -193,21 +351,20 @@ export function RecordingsPage() {
   return (
     <main className="main">
       <div className="toolbar">
-        <span className="toolbar-title">{t("page.recordings")}</span>
-        {listing && (
-          <span className="rec-summary">
-            {t("recordings.summary", { files: fileCount(files.length, t), size: formatSize(totalSize, units, t) })}
-          </span>
+        {keys.length > 0 && (
+          <div role="tablist" aria-label={t("recordings.hostTabs")} className="host-tabs">
+            {keys.map((k) => {
+              const n = tabCount(k);
+              return (
+                <button key={k} type="button" role="tab" aria-selected={k === tab} className="host-tab" onClick={() => switchTab(k)}>
+                  {k === skippedTab ? t("recordings.skippedTitle") : k.slice(2)}
+                  {n > 0 && <span className="tab-count">{n}</span>}
+                </button>
+              );
+            })}
+          </div>
         )}
         <span className="flex1" />
-        <button
-          type="button"
-          className="btn"
-          disabled={everyPath.length === 0}
-          onClick={() => setSelected(() => (allSelected ? new Set() : new Set(everyPath)))}
-        >
-          {t("recordings.selectAll")}
-        </button>
         <button type="button" className="btn" disabled={deletable.length === 0} onClick={() => setConfirming(true)}>
           <DeleteIcon />
           {deletable.length > 0 ? t("recordings.deleteCount", { count: deletable.length }) : t("action.delete")}
@@ -215,39 +372,46 @@ export function RecordingsPage() {
       </div>
       <div className="content" ref={contentRef}>
         {failed && <div className="empty-note">{t("recordings.loadFailed")}</div>}
-        {listing && files.length === 0 && skipped.length === 0 && <div className="empty-note">{t("recordings.empty")}</div>}
-        {listing?.hosts.map((g) => (
-          <section key={g.host} className="host-block">
+        {listing && keys.length === 0 && <div className="empty-note">{t("recordings.empty")}</div>}
+        {curHost && (
+          <section className="host-block">
             <header className="rec-head">
-              <span className="rec-host">{g.host}</span>
+              <GroupCheck
+                paths={curPaths}
+                selected={selected}
+                label={t("recordings.selectHost", { host: curHost.host })}
+                onChange={setSelected}
+              />
+              <span className="rec-host">{curHost.host}</span>
               <span className="flex1" />
               <span className="rec-summary">
-                {t("recordings.summary", { files: fileCount(g.files.length, t), size: formatSize(g.total_size, units, t) })}
+                {t("recordings.summary", { files: fileCount(curHost.files.length, t), size: formatSize(curHost.total_size, units, t) })}
               </span>
             </header>
             <ul className="rec-list">
-              {[...g.files].reverse().map((f) => (
+              {curFiles.map((f) => (
                 <Row
                   key={f.path}
                   selected={selected.has(f.path)}
-                  onSelectOnly={() => selectOnly(f.path)}
-                  onToggle={() => toggle(f.path, !selected.has(f.path))}
+                  onRowClick={(e) => clickRow(f.path, e)}
+                  onBoxClick={(e) => clickBox(f.path, e)}
                   muted={f.active}
                   label={rangeText(f, t)}
                   note={f.active ? t("recordings.active") : f.has_data ? undefined : t("recordings.noData")}
                   duration={f.has_data ? formatDuration(f.end - f.start, t) : undefined}
                   size={formatSize(f.size, units, t)}
-                  onOpen={() => openRecording(f.path)}
+                  onOpen={() => openFile(f.path)}
                   openText={t("recordings.open")}
                   openRef={f.path === solePath ? soleRef : undefined}
                 />
               ))}
             </ul>
           </section>
-        ))}
-        {skipped.length > 0 && (
+        )}
+        {onSkipped && (
           <section className="host-block">
             <header className="rec-head">
+              <GroupCheck paths={curPaths} selected={selected} label={t("recordings.selectSkipped")} onChange={setSelected} />
               <span className="rec-title">{t("recordings.skippedTitle")}</span>
             </header>
             <ul className="rec-list">
@@ -255,8 +419,8 @@ export function RecordingsPage() {
                 <Row
                   key={s.path}
                   selected={selected.has(s.path)}
-                  onSelectOnly={() => selectOnly(s.path)}
-                  onToggle={() => toggle(s.path, !selected.has(s.path))}
+                  onRowClick={(e) => clickRow(s.path, e)}
+                  onBoxClick={(e) => clickBox(s.path, e)}
                   label={s.path}
                   note={s.error}
                   size={formatSize(s.size, units, t)}

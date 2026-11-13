@@ -97,6 +97,7 @@ export function SettingsPage() {
                     <input
                       id={id}
                       type="checkbox"
+                      className="check"
                       checked={checked}
                       disabled={!checked && curves.length >= maxCurves}
                       onChange={(e) => toggleCurve(c, e.target.checked)}

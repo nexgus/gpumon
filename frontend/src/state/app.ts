@@ -67,13 +67,14 @@ export const uiStore = new Store<UIState>({ page: "monitor", selected: null });
 export const historyStore = new Store<HistoryState>({ path: null, left: null, pinned: null, maxSel: null });
 
 // RecordingsListState 為記錄檔清單離開後仍保留的狀態, 只存在於程式執行期間, 不存入設定檔.
-// selected 為選取的檔案路徑, scrollTop 為離開清單時內容區的捲動位置.
+// selected 為各分頁選取的檔案路徑, tab 為目前分頁的識別 (null 為尚未進入過), scrollTop 為離開清單時內容區的捲動位置.
 export interface RecordingsListState {
   selected: ReadonlySet<string>;
+  tab: string | null;
   scrollTop: number;
 }
 
-export const recordingsListStore = new Store<RecordingsListState>({ selected: new Set(), scrollTop: 0 });
+export const recordingsListStore = new Store<RecordingsListState>({ selected: new Set(), tab: null, scrollTop: 0 });
 export const connectErrorsStore = new Store<ConnectError[]>([]);
 export const operationErrorsStore = new Store<OperationError[]>([]);
 // promptsStore 只存輸入要求的說明 (主機, 種類, 次數), 不含輸入的值.
@@ -538,9 +539,8 @@ export function showRecordings(): void {
   showPage("recordings");
 }
 
-// openRecording 開啟 path 的記錄檔並顯示歷史畫面, 同時把記錄檔清單的選取改為只有 path.
+// openRecording 開啟 path 的記錄檔並顯示歷史畫面.
 export function openRecording(path: string): void {
-  recordingsListStore.update((r) => ({ ...r, selected: new Set([path]) }));
   historyStore.set({ path, left: null, pinned: null, maxSel: null });
   showPage("history");
 }

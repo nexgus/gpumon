@@ -78,6 +78,7 @@ export function ProcessFilterDialog({
               <input
                 id={`pf-gpu${g.id}`}
                 type="checkbox"
+                className="check"
                 checked={checked.has(g.id)}
                 onChange={(e) => toggle(g.id, e.target.checked)}
               />

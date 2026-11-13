@@ -25,7 +25,6 @@
   "state.reconnectingReason": "Reconnecting - {reason}",
   "state.disconnectedRetries": "Disconnected after {max} retries - {reason}",
 
-  "page.recordings": "Recordings",
   "page.settings": "Settings",
 
   "monitor.hostTabs": "Hosts",
@@ -190,7 +189,9 @@
   "recordings.fileOne": "1 file",
   "recordings.fileMany": "{count} files",
   "recordings.summary": "{files}, {size}",
-  "recordings.selectAll": "Select All",
+  "recordings.hostTabs": "Hosts",
+  "recordings.selectHost": "Select all recordings of {host}",
+  "recordings.selectSkipped": "Select all files that cannot be opened",
   "recordings.open": "Open",
   "recordings.deleteCount": "Delete ({count})",
   "recordings.now": "now",
