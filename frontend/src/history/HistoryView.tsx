@@ -4,9 +4,8 @@ import { serviceError } from "../api/errors";
 import type { RecordingInfo } from "../api/types";
 import type { ChartEdge } from "../chart/Chart";
 import { ArrowLeftIcon } from "../components/Icons";
-import { formatClock, formatDateRange, formatDateTime } from "../format";
+import { formatClock, formatDateRange, formatDateTime, formatLength } from "../format";
 import { useT } from "../i18n";
-import { ZoomControls } from "../monitor/controls";
 import {
   choicesStore,
   defaultCurves,
@@ -77,13 +76,15 @@ export function HistoryView() {
   const loaded = useInfo(path);
 
   // 有固定時刻且畫面上沒有對話框時, Esc 清除固定時刻. 以擷取階段監聽, 使對話框自己的
-  // Esc 處理先關閉對話框之前即可判斷.
+  // Esc 處理先關閉對話框之前即可判斷. 曲線圖選取時段時的 Esc 只取消選取: 選取中, 或
+  // 曲線圖已先處理並 preventDefault 時不清除.
+  const selectingRef = useRef(false);
   useEffect(() => {
     if (pinned === null) {
       return;
     }
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !document.querySelector('[role="dialog"]')) {
+      if (e.key === "Escape" && !e.defaultPrevented && !selectingRef.current && !document.querySelector('[role="dialog"]')) {
         setHistoryPinned(null);
       }
     };
@@ -201,6 +202,43 @@ export function HistoryView() {
     },
     [moveBy, stopFling],
   );
+  // fitRange 把選取的時段換算為放開後的顯示範圍: 長度取整至毫秒, 短於下限時以時段中心
+  // 擴展至下限, 超出捲動範圍時平移至捲動範圍內; 長度達捲動範圍的長度即為整個捲動範圍.
+  const fitRange = useCallback((a: number, b: number): [number, number] => {
+    const v = view.current;
+    const lo = Math.max(v.min, Math.min(a, b));
+    const hi = Math.min(v.max, Math.max(a, b));
+    const len = Math.min(v.total, Math.max(v.minLen, Math.round((hi - lo) / 1000) * 1000));
+    if (len >= v.total) {
+      return [v.min, v.min + v.total];
+    }
+    const left = Math.max(v.min, Math.min(v.max - len, (lo + hi) / 2 - len / 2));
+    return [left, left + len];
+  }, []);
+  // onRange 以選取的時段 (fitRange 的結果) 為新的顯示範圍, 進出顯示全部狀態的規則與 zoom 相同.
+  const onRange = useCallback(
+    (from: number, to: number) => {
+      stopFling();
+      const v = view.current;
+      const next = to - from;
+      const toAll = next >= v.total;
+      const nextLeft = toAll ? v.min : from;
+      v.span = next;
+      v.left = nextLeft;
+      v.maxLeft = Math.max(v.min, v.max - next);
+      setHistoryLeft(nextLeft);
+      setHistorySpan(next / 1000, toAll, minMS);
+    },
+    [stopFling, minMS],
+  );
+  const onSelecting = useCallback((on: boolean) => {
+    selectingRef.current = on;
+  }, []);
+  const rangeLabel = useCallback(
+    (from: number, to: number) =>
+      t("history.selectRange", { from: formatClock(from), to: formatClock(to), length: formatLength(to - from, t) }),
+    [t],
+  );
   const edge = useMemo(
     (): ChartEdge => ({
       canLeft: scrollable && left > min,
@@ -214,8 +252,12 @@ export function HistoryView() {
       onStop: stopFling,
       onDrag,
       onFling,
+      fitRange,
+      onSelecting,
+      onRange,
+      rangeLabel,
     }),
-    [scrollable, flinging, left, min, maxLeft, dir, onPan, stopFling, onDrag, onFling],
+    [scrollable, flinging, left, min, maxLeft, dir, onPan, stopFling, onDrag, onFling, fitRange, onSelecting, onRange, rangeLabel],
   );
 
   // zoom 以 factor 倍變更顯示範圍的長度, 限制於上下限之間, 並使位於 at (佔顯示範圍寬度的
@@ -240,7 +282,6 @@ export function HistoryView() {
     },
     [stopFling, minMS],
   );
-  const onButtonZoom = useCallback((factor: number) => zoom(factor, 0.5), [zoom]);
   const showAll = () => {
     stopFling();
     setHistoryLeft(min);
@@ -316,12 +357,9 @@ export function HistoryView() {
           )}
         </span>
         {info && (
-          <>
-            <ZoomControls span={span} min={minLen} max={total} outDisabled={all} onZoom={onButtonZoom} />
-            <button type="button" className="btn" aria-pressed={all} onClick={showAll}>
-              {t("history.showAll")}
-            </button>
-          </>
+          <button type="button" className="btn" aria-pressed={all} onClick={showAll}>
+            {t("history.showAll")}
+          </button>
         )}
       </div>
       <div className="content">

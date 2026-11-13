@@ -646,6 +646,11 @@ button:disabled {
   background: var(--surface);
 }
 
+/* 歷史畫面的繪圖區: 拖曳為選取時段, 按住 Shift 且可平移時為平移. */
+.chart-plot.selectable {
+  cursor: col-resize;
+}
+
 .chart-plot.pannable {
   cursor: grab;
 }
@@ -677,6 +682,37 @@ button:disabled {
   bottom: 0;
   width: 1px;
   background: repeating-linear-gradient(to bottom, var(--text) 0 4px, transparent 4px 7px);
+  pointer-events: none;
+}
+
+/* 歷史畫面拖曳選取的時段, 佔滿繪圖區全高, 只有左右兩條邊線. */
+.chart-select {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  box-sizing: border-box;
+  border-left: 1px solid var(--accent);
+  border-right: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  pointer-events: none;
+}
+
+/* 選取區的起訖時刻與長度標籤, 位置由程式限制於繪圖區內. */
+.chart-select-label {
+  position: absolute;
+  top: 6px;
+  z-index: 10;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: 100%;
+  padding: 2px 6px;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
   pointer-events: none;
 }
 
@@ -730,7 +766,10 @@ button:disabled {
   pointer-events: none;
 }
 
+/* 操作說明過長時於提示內換行, 提示的寬度不因說明而超出繪圖區. */
 .chart-tip-hint {
+  max-width: 280px;
+  white-space: normal;
   margin-top: 4px;
   padding-top: 3px;
   border-top: 1px solid var(--border);

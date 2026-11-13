@@ -90,10 +90,14 @@ export interface ChartProps {
 // active 為正在自動捲動的方向 (-1 往較早, 1 往較晚, 0 為未捲動). onEdge 於游標在邊緣區
 // 停留夠久時回報方向, 離開邊緣區時回報 0. onPan 回報橫向滾動的位移, 單位為繪圖區寬度
 // 的倍數, 正值往較晚的時間.
-// scrollable 表示捲動範圍長於顯示範圍, 才能按住拖曳平移. flinging 表示慣性捲動進行中.
-// onHold 回報按住滑鼠 (平移中或尚未超過門檻) 的開始與結束. onStop 停止慣性捲動, 回傳
-// 先前是否正在滑動. onDrag 將顯示範圍左緣設為指定時刻 (Unix 微秒, 超出範圍時限制於
-// 捲動範圍內). onFling 於平移放開時回報起始速度 (手的水平速度, 像素/秒) 與繪圖區寬度.
+// scrollable 表示捲動範圍長於顯示範圍, 才能按住 Shift 拖曳平移. flinging 表示慣性捲動
+// 進行中. onHold 回報按住滑鼠 (平移, 選取或尚未超過門檻) 的開始與結束. onStop 停止慣性
+// 捲動, 回傳先前是否正在滑動. onDrag 將顯示範圍左緣設為指定時刻 (Unix 微秒, 超出範圍時
+// 限制於捲動範圍內). onFling 於平移放開時回報起始速度 (手的水平速度, 像素/秒) 與繪圖區
+// 寬度.
+// 未按住 Shift 的拖曳為選取時段: fitRange 把拖曳所涵蓋的起訖時刻換算為放開後實際的顯示
+// 範圍 (短於下限時擴展, 並限制於捲動範圍內). onSelecting 回報選取的開始與結束 (含取消).
+// onRange 於放開時以 fitRange 的結果回報新的顯示範圍. rangeLabel 回傳選取區標籤的文字.
 export interface ChartEdge {
   canLeft: boolean;
   canRight: boolean;
@@ -106,6 +110,10 @@ export interface ChartEdge {
   onStop: () => boolean;
   onDrag: (left: number) => void;
   onFling: (vx: number, width: number) => void;
+  fitRange: (a: number, b: number) => [number, number];
+  onSelecting: (on: boolean) => void;
+  onRange: (from: number, to: number) => void;
+  rangeLabel: (from: number, to: number) => string;
 }
 
 // 時間軸的刻度數上限; 曲線圖較窄時減少, 使刻度文字不重疊, 至少保留兩端.
@@ -136,13 +144,21 @@ interface WebKitGesture extends UIEvent {
   clientX?: number;
 }
 
+// Gesture 為按住滑鼠的手勢. select 為真表示按下時未按住 Shift, 拖曳為選取時段, 否則為
+// 平移. px0 為按下處相對於繪圖區左緣的位置. captured 表示已擷取 pointer, 選取一律擷取,
+// 平移只在可平移時擷取. panning 與 selecting 為已超過門檻, 開始平移或選取.
 interface Gesture {
+  pointerId: number;
   x0: number;
   y0: number;
+  px0: number;
   from0: number;
   span0: number;
+  select: boolean;
+  captured: boolean;
   pannable: boolean;
   panning: boolean;
+  selecting: boolean;
   samples: { t: number; x: number }[];
 }
 
@@ -397,12 +413,19 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, hover
   toRef.current = to;
   const gesture = useRef<Gesture | null>(null);
   const skipClick = useRef(false);
-  const [held, setHeld] = useState(false);
+  // held 為按住中的手勢種類, 未按住時為 null.
+  const [held, setHeld] = useState<"pan" | "select" | null>(null);
   const [panning, setPanning] = useState(false);
+  const [selecting, setSelecting] = useState(false);
+  const [shift, setShift] = useState(false);
+  const selRange = useRef<[number, number] | null>(null);
+  const labelRef = useRef<HTMLDivElement>(null);
+  const [labelWidth, setLabelWidth] = useState(0);
   const flinging = edge?.flinging ?? false;
+  const hasEdge = edge !== undefined;
   const id = useId();
   const shared = useStore(hoverStore, (h) => h);
-  const busy = panning || flinging || shared.panning;
+  const busy = panning || flinging || shared.panning || shared.select !== null;
 
   // 滑鼠所指的時刻寫入共用狀態; 離開時只清除自己寫入的.
   const publish = useCallback(
@@ -422,10 +445,21 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, hover
   }, [panning, hoverStore]);
   useEffect(
     () => () => {
-      hoverStore.update((h) => (h.src === id ? { ...h, t: null, src: null } : h));
+      hoverStore.update((h) => {
+        const next = h.src === id ? { ...h, t: null, src: null } : h;
+        return next.select?.src === id ? { ...next, select: null } : next;
+      });
     },
     [hoverStore, id],
   );
+
+  // 結束選取並清除共用的選取區.
+  const endSelect = useCallback(() => {
+    selRange.current = null;
+    setSelecting(false);
+    edgeRef.current?.onSelecting(false);
+    hoverStore.update((h) => (h.select?.src === id ? { ...h, select: null } : h));
+  }, [hoverStore, id]);
 
   // 清除邊緣區的停留計時, 並在已回報捲動時回報停止.
   const resetZone = useCallback(() => {
@@ -438,43 +472,57 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, hover
     }
   }, []);
 
-  // 結束按住的手勢. fling 為真時依放開前的速度啟動慣性捲動, 取消, 失去焦點與失去
-  // pointer capture 時不滑動.
-  const finishGesture = useCallback((el: HTMLElement | null, pointerId: number | null, fling: boolean) => {
-    const g = gesture.current;
-    gesture.current = null;
-    if (!g || !g.pannable) {
-      return;
-    }
-    if (el && pointerId !== null && el.hasPointerCapture(pointerId)) {
-      el.releasePointerCapture(pointerId);
-    }
-    setHeld(false);
-    edgeRef.current?.onHold(false);
-    if (!g.panning) {
-      return;
-    }
-    setPanning(false);
-    if (!fling) {
-      return;
-    }
-    const now = performance.now();
-    const win = g.samples.filter((s) => now - s.t <= VELOCITY_WINDOW_MS);
-    if (win.length < 2) {
-      return;
-    }
-    const dt = (now - win[0].t) / 1000;
-    const vx = (win[win.length - 1].x - win[0].x) / Math.max(dt, 0.001);
-    if (Math.abs(vx) >= FLING_MIN_SPEED) {
-      edgeRef.current?.onFling(vx, widthRef.current);
-    }
-  }, []);
+  // 結束按住的手勢. commit 為真表示放開滑鼠: 平移依放開前的速度啟動慣性捲動, 選取以
+  // 所選時段為新的顯示範圍. 取消, Esc, 失去焦點與失去 pointer capture 時兩者皆不進行.
+  const finishGesture = useCallback(
+    (commit: boolean) => {
+      const g = gesture.current;
+      gesture.current = null;
+      if (!g || !g.captured) {
+        return;
+      }
+      const el = boxRef.current;
+      if (el && el.hasPointerCapture(g.pointerId)) {
+        el.releasePointerCapture(g.pointerId);
+      }
+      setHeld(null);
+      edgeRef.current?.onHold(false);
+      if (g.select) {
+        if (g.selecting) {
+          const r = selRange.current;
+          if (commit && r) {
+            edgeRef.current?.onRange(r[0], r[1]);
+          }
+          endSelect();
+        }
+        return;
+      }
+      if (!g.panning) {
+        return;
+      }
+      setPanning(false);
+      if (!commit) {
+        return;
+      }
+      const now = performance.now();
+      const win = g.samples.filter((s) => now - s.t <= VELOCITY_WINDOW_MS);
+      if (win.length < 2) {
+        return;
+      }
+      const dt = (now - win[0].t) / 1000;
+      const vx = (win[win.length - 1].x - win[0].x) / Math.max(dt, 0.001);
+      if (Math.abs(vx) >= FLING_MIN_SPEED) {
+        edgeRef.current?.onFling(vx, widthRef.current);
+      }
+    },
+    [endSelect],
+  );
 
   // 卸載與視窗失去焦點時停止邊緣捲動, 並結束按住的手勢.
   useEffect(() => {
     const onBlur = () => {
       resetZone();
-      finishGesture(boxRef.current, null, false);
+      finishGesture(false);
     };
     window.addEventListener("blur", onBlur);
     return () => {
@@ -483,12 +531,48 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, hover
     };
   }, [resetZone, finishGesture]);
 
+  // 選取進行中按 Esc 取消選取. 以擷取階段監聽並 preventDefault, 歷史畫面據此不清除固定
+  // 時刻.
+  useEffect(() => {
+    if (!selecting) {
+      return;
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        finishGesture(false);
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [selecting, finishGesture]);
+
+  // 追蹤 Shift 是否按住, 供游標樣式判斷可否平移 (歷史畫面).
+  useEffect(() => {
+    if (!hasEdge) {
+      return;
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Shift") {
+        setShift(e.type === "keydown");
+      }
+    };
+    const onBlur = () => setShift(false);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKey);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onKey);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [hasEdge]);
+
   // 滾輪與捏合. React 的 wheel 監聽為 passive, 無法 preventDefault, 故直接掛在元素上.
   // 按住 Ctrl (macOS 另可按住 ⌘) 的滾輪縮放, 不捲動; Chromium 核心的 WebView 亦以此形式
   // 送出觸控板捏合. 其餘只攔截橫向移動與 Shift 加滾輪 (歷史畫面), 純垂直滾動留給內容區.
   // macOS 的 WKWebView 可能改以 gesturestart, gesturechange, gestureend 送出捏合, 一併
   // 處理; 捏合進行中略過按住 Ctrl 的滾輪, 避免重複縮放.
-  const hasEdge = edge !== undefined;
   const hasZoom = onZoom !== undefined;
   useEffect(() => {
     const box = boxRef.current;
@@ -706,7 +790,7 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, hover
 
   // 按住與慣性捲動結束後, 游標仍在邊緣區則重新計時.
   useEffect(() => {
-    if (hasEdge && !held && !flinging && pointer.current !== null) {
+    if (hasEdge && held === null && !flinging && pointer.current !== null) {
       checkZone(pointer.current);
     }
   }, [hasEdge, held, flinging, checkZone]);
@@ -715,7 +799,10 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, hover
     const rect = e.currentTarget.getBoundingClientRect();
     const x = Math.min(Math.max(0, e.clientX - rect.left), rect.width);
     pointer.current = x;
-    if (edge && !gesture.current?.pannable && !edge.flinging) {
+    if (edge) {
+      setShift(e.shiftKey);
+    }
+    if (edge && !gesture.current?.captured && !edge.flinging) {
       checkZone(x);
     }
     setHover(describe(x, true));
@@ -727,22 +814,46 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, hover
     }
     const stopped = edge.onStop();
     skipClick.current = stopped;
-    const pannable = edge.scrollable;
+    const select = !e.shiftKey;
+    const pannable = !select && edge.scrollable;
+    const captured = select || pannable;
+    const rect = e.currentTarget.getBoundingClientRect();
     gesture.current = {
+      pointerId: e.pointerId,
       x0: e.clientX,
       y0: e.clientY,
+      px0: Math.min(Math.max(0, e.clientX - rect.left), rect.width),
       from0: from,
       span0: Math.max(1, to - from),
+      select,
+      captured,
       pannable,
       panning: false,
+      selecting: false,
       samples: [{ t: performance.now(), x: e.clientX }],
     };
-    if (pannable) {
+    if (captured) {
       e.currentTarget.setPointerCapture(e.pointerId);
       resetZone();
-      setHeld(true);
+      setHeld(select ? "select" : "pan");
       edge.onHold(true);
     }
+  };
+  // updateSelect 依游標的水平位置更新選取區; 位置限制於繪圖區內, 上下位置不影響.
+  const updateSelect = (g: Gesture, clientX: number) => {
+    const ed = edgeRef.current;
+    const box = boxRef.current;
+    if (!ed || !box) {
+      return;
+    }
+    const rect = box.getBoundingClientRect();
+    const x = Math.min(Math.max(0, clientX - rect.left), rect.width);
+    const w = Math.max(1, widthRef.current);
+    const a = g.from0 + (g.px0 / w) * g.span0;
+    const b = g.from0 + (x / w) * g.span0;
+    const [s, t] = ed.fitRange(Math.min(a, b), Math.max(a, b));
+    selRange.current = [s, t];
+    hoverStore.update((h) => ({ ...h, select: { from: s, to: t, src: id } }));
   };
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const g = gesture.current;
@@ -753,6 +864,18 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, hover
     g.samples.push({ t: now, x: e.clientX });
     while (g.samples.length > 2 && now - g.samples[0].t > 2 * VELOCITY_WINDOW_MS) {
       g.samples.shift();
+    }
+    if (g.select) {
+      if (!g.selecting && Math.abs(e.clientX - g.x0) > DRAG_THRESHOLD) {
+        g.selecting = true;
+        skipClick.current = true;
+        setSelecting(true);
+        edgeRef.current?.onSelecting(true);
+      }
+      if (g.selecting) {
+        updateSelect(g, e.clientX);
+      }
+      return;
     }
     if (!g.panning && Math.hypot(e.clientX - g.x0, e.clientY - g.y0) > DRAG_THRESHOLD) {
       skipClick.current = true;
@@ -765,8 +888,8 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, hover
       edgeRef.current?.onDrag(g.from0 - ((e.clientX - g.x0) / Math.max(1, widthRef.current)) * g.span0);
     }
   };
-  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => finishGesture(e.currentTarget, e.pointerId, true);
-  const onPointerCancel = (e: React.PointerEvent<HTMLDivElement>) => finishGesture(e.currentTarget, e.pointerId, false);
+  const onPointerUp = () => finishGesture(true);
+  const onPointerCancel = () => finishGesture(false);
   const onClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (skipClick.current) {
       skipClick.current = false;
@@ -791,6 +914,29 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, hover
       ? ((pinned - from) / Math.max(1, to - from)) * width
       : null;
   const shown = hover ?? remote;
+
+  // 選取區為所有曲線圖共用的時段; 正在拖曳的曲線圖另於選取區上方顯示起訖時刻與長度的標籤,
+  // 以選取區中央為準, 限制於繪圖區內.
+  const sel = shared.select;
+  const selX0 = sel && width > 0 ? Math.max(0, ((sel.from - from) / Math.max(1, to - from)) * width) : null;
+  const selX1 = sel && width > 0 ? Math.min(width, ((sel.to - from) / Math.max(1, to - from)) * width) : null;
+  const selLabel = sel && sel.src === id && edge ? edge.rangeLabel(sel.from, sel.to) : null;
+  useLayoutEffect(() => {
+    const w = labelRef.current?.offsetWidth ?? 0;
+    setLabelWidth((old) => (old === w ? old : w));
+  }, [selLabel, width]);
+  const labelLeft =
+    selX0 !== null && selX1 !== null
+      ? Math.min(Math.max(0, (selX0 + selX1) / 2 - labelWidth / 2), Math.max(0, width - labelWidth))
+      : 0;
+  let plotClass = "chart-plot";
+  if (panning) {
+    plotClass = "chart-plot panning";
+  } else if (held === "pan" || (held === null && edge && shift && edge.scrollable)) {
+    plotClass = "chart-plot pannable";
+  } else if (edge) {
+    plotClass = "chart-plot selectable";
+  }
   const tipLeft = shown && width > 0 && shown.x > width * 0.62 ? undefined : shown ? shown.x + 8 : undefined;
   const tipRight = shown && width > 0 && shown.x > width * 0.62 ? width - shown.x + 8 : undefined;
 
@@ -802,7 +948,7 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, hover
         <span>0</span>
       </div>
       <div
-        className={panning ? "chart-plot panning" : edge?.scrollable ? "chart-plot pannable" : "chart-plot"}
+        className={plotClass}
         ref={boxRef}
         onMouseMove={onMove}
         onMouseLeave={onLeave}
@@ -823,6 +969,14 @@ function ChartImpl({ from, to, data, series, ariaLabel, gapTitle, onWidth, hover
         {edge?.canRight && (
           <div className="chart-edge chart-edge-right" aria-hidden="true">
             <span className={edge.active > 0 ? "chart-edge-arrow active" : "chart-edge-arrow"}>›</span>
+          </div>
+        )}
+        {selX0 !== null && selX1 !== null && selX1 > selX0 && (
+          <div className="chart-select" style={{ left: selX0, width: selX1 - selX0 }} />
+        )}
+        {selLabel !== null && (
+          <div className="chart-select-label" ref={labelRef} style={{ left: labelLeft }}>
+            {selLabel}
           </div>
         )}
         {!busy && shown?.line && <div className="chart-cursor" style={{ left: shown.x }} />}

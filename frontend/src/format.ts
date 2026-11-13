@@ -86,6 +86,28 @@ export function formatDuration(us: number, t: Translator): string {
   return h === 0 ? t("duration.day", { d }) : t("duration.dayHour", { d, h });
 }
 
+// formatLength 把微秒的長度格式化至秒, 例如 "2 m 5 s"; 不足 1 分鐘只列秒, 達 1 小時改列
+// 小時與分鐘, 達 48 小時改列天與小時, 為零的末項省略. 用於所選時段的長度.
+export function formatLength(us: number, t: Translator): string {
+  const seconds = Math.max(0, Math.round(us / 1e6));
+  if (seconds < 60) {
+    return t("length.sec", { s: seconds });
+  }
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) {
+    const s = seconds % 60;
+    return s === 0 ? t("length.min", { m: minutes }) : t("length.minSec", { m: minutes, s });
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) {
+    const m = minutes % 60;
+    return m === 0 ? t("length.hour", { h: hours }) : t("length.hourMin", { h: hours, m });
+  }
+  const d = Math.floor(hours / 24);
+  const h = hours % 24;
+  return h === 0 ? t("length.day", { d }) : t("length.dayHour", { d, h });
+}
+
 // formatDateRange 格式化記錄檔的起訖時刻, 兩端為同一天時終點省略日期.
 export function formatDateRange(start: number, end: number): string {
   const a = formatDateTime(start);
