@@ -122,6 +122,69 @@ func Maxima(path string) (*MaximaResult, error) {
 	return res, nil
 }
 
+// GPUFileMax 為單張 GPU 各欄位於整個記錄檔至目前為止的最大值, 不含出現處. 沒有任何數值
+// 的欄位不在 Fields 之中.
+type GPUFileMax struct {
+	ID     int               `json:"id"`
+	Fields map[Field]float64 `json:"fields"`
+}
+
+// MaxTracker 逐筆累計寫入中記錄檔的取樣, 維護每張 GPU 每個欄位的最大值, 數值與 Maxima
+// 相同但不記錄出現處. 每筆取樣的累計成本與記錄檔長度無關. 不可同時由多個 goroutine 使用.
+type MaxTracker struct {
+	ids []int
+	max [][]float64
+	has [][]bool
+}
+
+// NewMaxTracker 回傳尚未累計任何取樣的 MaxTracker, ids 為記錄檔的 GPU 順序.
+func NewMaxTracker(ids []int) *MaxTracker {
+	m := &MaxTracker{ids: slices.Clone(ids), max: make([][]float64, len(ids)), has: make([][]bool, len(ids))}
+	for i := range ids {
+		m.max[i] = make([]float64, len(maximaFields))
+		m.has[i] = make([]bool, len(maximaFields))
+	}
+	return m
+}
+
+// Add 累計一筆記錄; 取樣以外的記錄不影響最大值. rec.GPUs 須依記錄檔的 GPU 順序排列.
+func (m *MaxTracker) Add(rec *recording.Record) {
+	if rec.Kind != recording.KindSample {
+		return
+	}
+	for gi := range rec.GPUs {
+		if gi >= len(m.ids) {
+			break
+		}
+		for fi, fld := range maximaFields {
+			if v, ok := fieldValue(&rec.GPUs[gi], fld); ok && (!m.has[gi][fi] || v > m.max[gi][fi]) {
+				m.has[gi][fi], m.max[gi][fi] = true, v
+			}
+		}
+	}
+}
+
+// Result 回傳目前的最大值, GPU 依 id 遞增; 重複的 GPU id 只取第一張, 與 Maxima 相同.
+func (m *MaxTracker) Result() []GPUFileMax {
+	out := make([]GPUFileMax, 0, len(m.ids))
+	seen := map[int]bool{}
+	for gi, id := range m.ids {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		g := GPUFileMax{ID: id, Fields: map[Field]float64{}}
+		for fi, fld := range maximaFields {
+			if m.has[gi][fi] {
+				g.Fields[fld] = m.max[gi][fi]
+			}
+		}
+		out = append(out, g)
+	}
+	slices.SortFunc(out, func(a, b GPUFileMax) int { return a.ID - b.ID })
+	return out
+}
+
 // SampleGPU 為單筆取樣中單張 GPU 的數值, 無值的欄位為 nil.
 type SampleGPU struct {
 	ID       int     `json:"id"`

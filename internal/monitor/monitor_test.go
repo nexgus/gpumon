@@ -1162,3 +1162,114 @@ func TestHostManagement(t *testing.T) {
 		t.Fatalf("%d hosts", got)
 	}
 }
+
+// fileMaxUtil 回傳查詢結果所附整檔最大值中 GPU gpu 的使用率; 沒有時為 -1.
+func fileMaxUtil(t *testing.T, res *history.Result, gpu int) float64 {
+	t.Helper()
+	for _, g := range res.FileMax {
+		if g.ID == gpu {
+			if v, ok := g.Fields[history.FieldUtil]; ok {
+				return v
+			}
+		}
+	}
+	return -1
+}
+
+func TestQueryFileMax(t *testing.T) {
+	e := newEnv(t, testTiming())
+	id := e.addHost("alice", "gpu01")
+	ls := newLinks()
+	e.dialer.set(okDialer(ls, "alice", nvidiaDevices(0)))
+	t0 := e.clock.now().UnixMicro()
+	e.m.Connect(id)
+	l := ls.next(t)
+	e.waitState(id, StateConnected)
+	ctx := context.Background()
+	all := history.Query{From: t0 - 10_000_000, To: t0 + 600_000_000, Width: 1000, Fields: []history.Field{history.FieldUtil}}
+
+	// 尚未存檔的取樣計入最大值.
+	for i, u := range []int{10, 40, 20} {
+		l.send(sampleMsg(1000+float64(i), u, []int{0}))
+	}
+	e.waitLiveTime(id, t0+2_000_000)
+	res, err := e.m.Query(ctx, id, all)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := fileMaxUtil(t, res, 0); v != 40 {
+		t.Fatalf("file max before saving %v", v)
+	}
+
+	// 存檔後的新取樣持續更新最大值, 且最大值不受查詢範圍限制.
+	e.m.recorderRefFor(id).flush()
+	l.send(sampleMsg(1003, 30, []int{0}))
+	e.waitLiveTime(id, t0+3_000_000)
+	narrow := all
+	narrow.From = t0 + 3_000_000
+	if res, err = e.m.Query(ctx, id, narrow); err != nil {
+		t.Fatal(err)
+	}
+	if res.Samples != 1 || fileMaxUtil(t, res, 0) != 40 {
+		t.Fatalf("narrow query: %d samples, file max %v", res.Samples, fileMaxUtil(t, res, 0))
+	}
+	l.send(sampleMsg(1004, 55, []int{0}))
+	e.waitLiveTime(id, t0+4_000_000)
+	if res, err = e.m.Query(ctx, id, all); err != nil || fileMaxUtil(t, res, 0) != 55 {
+		t.Fatalf("file max after a new sample: %v, %v", fileMaxUtil(t, res, 0), err)
+	}
+	path := e.status(id).Recording
+
+	// 自動重新連線而續寫同一個記錄檔時, 最大值涵蓋重新連線之前的取樣, 雖然曲線只含本次連線.
+	l.die(errors.New("EOF"))
+	l2 := ls.next(t)
+	e.waitState(id, StateConnected)
+	t1 := t0 + 20_000_000
+	e.clock.set(t1)
+	l2.send(sampleMsg(3000, 5, []int{0}))
+	e.waitLiveTime(id, t1)
+	if p := e.status(id).Recording; p != path {
+		t.Fatalf("recording changed to %s", p)
+	}
+	if res, err = e.m.Query(ctx, id, all); err != nil {
+		t.Fatal(err)
+	}
+	if res.Samples != 1 || fileMaxUtil(t, res, 0) != 55 {
+		t.Fatalf("after auto reconnect: %d samples, file max %v", res.Samples, fileMaxUtil(t, res, 0))
+	}
+
+	// 最大值與存檔後掃描整個記錄檔所得的結果相同.
+	e.m.recorderRefFor(id).flush()
+	mx, err := history.Maxima(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := mx.GPUs[0].Fields[history.FieldUtil].Value; got != fileMaxUtil(t, res, 0) {
+		t.Fatalf("maxima of the saved file %v, file max %v", got, fileMaxUtil(t, res, 0))
+	}
+	if mem := mx.GPUs[0].Fields[history.FieldMemUsed].Value; res.FileMax[0].Fields[history.FieldMemUsed] != mem {
+		t.Fatalf("memory maximum %v, want %v", res.FileMax[0].Fields[history.FieldMemUsed], mem)
+	}
+
+	// 使用者重新連線而另開新檔時, 最大值重新計算.
+	e.m.Disconnect(id)
+	e.clock.set(t0 + 40_000_000)
+	e.m.Connect(id)
+	l3 := ls.next(t)
+	e.waitState(id, StateConnected)
+	l3.send(sampleMsg(1, 7, []int{0}))
+	e.waitLiveTime(id, t0+40_000_000)
+	if p := e.status(id).Recording; p == path || p == "" {
+		t.Fatalf("no new recording: %q", p)
+	}
+	all.To = t0 + 50_000_000
+	if res, err = e.m.Query(ctx, id, all); err != nil || fileMaxUtil(t, res, 0) != 7 {
+		t.Fatalf("file max of the new recording: %v, %v", fileMaxUtil(t, res, 0), err)
+	}
+
+	// 未連線時沒有寫入中的記錄檔, 不附最大值.
+	e.m.Disconnect(id)
+	if res, err = e.m.Query(ctx, id, all); err != nil || res.FileMax != nil {
+		t.Fatalf("file max while disconnected: %+v, %v", res.FileMax, err)
+	}
+}

@@ -59,7 +59,7 @@ export const HostBlock = memo(function HostBlock(p: HostBlockProps) {
     const m = new Map<number, ReturnType<typeof gpuSeries>>();
     if (result) {
       for (const g of gpus) {
-        m.set(g.id, gpuSeries(result, g.id, g, p.curves, units, t));
+        m.set(g.id, gpuSeries(result, g.id, g, p.curves, units, t, result.file_max?.find((x) => x.id === g.id)?.fields ?? {}));
       }
     }
     return m;

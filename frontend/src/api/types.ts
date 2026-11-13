@@ -188,9 +188,16 @@ export interface Gap {
   message?: string;
 }
 
+// GPUFileMax 為單張 GPU 各欄位於整個記錄檔至目前為止的最大值; 沒有數值的欄位不含該鍵.
+export interface GPUFileMax {
+  id: number;
+  fields: Partial<Record<Field, number>>;
+}
+
 // QueryResult 為曲線查詢的結果, 意義見 internal/history 的 Result.
 // last 為範圍內最後一筆取樣的時刻; counts 只於以 stats 查詢且降採樣時提供, 為各像素
-// 範圍內的取樣筆數.
+// 範圍內的取樣筆數. file_max 只於監看畫面的查詢提供, 為寫入中的記錄檔 (含尚未存檔的
+// 取樣) 至查詢當下的最大值.
 export interface QueryResult {
   from: number;
   to: number;
@@ -203,6 +210,7 @@ export interface QueryResult {
   breaks: number[] | null;
   gpus: GPUCurves[] | null;
   gaps: Gap[] | null;
+  file_max?: GPUFileMax[] | null;
 }
 
 // FieldMax 為單張 GPU 單一欄位於整個記錄檔的最大值. runs 為最大值的出現處, 依時刻遞增,

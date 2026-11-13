@@ -119,18 +119,22 @@ type Gap struct {
 //
 // Last 為範圍內最後一筆取樣的時刻, Samples 為 0 時為 0. 查詢條件的 Stats 為真且降採樣時,
 // Counts 為各像素範圍內的取樣筆數.
+//
+// FileMax 只於監看畫面的查詢提供, 為寫入中的記錄檔 (含尚未存檔的取樣) 每張 GPU 每個欄位
+// 至查詢當下的最大值, 不受查詢範圍與欄位限制; 其餘查詢為 nil.
 type Result struct {
-	From    int64       `json:"from"`
-	To      int64       `json:"to"`
-	Width   int         `json:"width"`
-	Binned  bool        `json:"binned"`
-	Samples int         `json:"samples"`
-	Last    int64       `json:"last"`
-	Counts  []uint32    `json:"counts,omitempty"`
-	Times   []int64     `json:"times"`
-	Breaks  []int       `json:"breaks"`
-	GPUs    []GPUCurves `json:"gpus"`
-	Gaps    []Gap       `json:"gaps"`
+	From    int64        `json:"from"`
+	To      int64        `json:"to"`
+	Width   int          `json:"width"`
+	Binned  bool         `json:"binned"`
+	Samples int          `json:"samples"`
+	Last    int64        `json:"last"`
+	Counts  []uint32     `json:"counts,omitempty"`
+	Times   []int64      `json:"times"`
+	Breaks  []int        `json:"breaks"`
+	GPUs    []GPUCurves  `json:"gpus"`
+	Gaps    []Gap        `json:"gaps"`
+	FileMax []GPUFileMax `json:"file_max,omitempty"`
 }
 
 func validateFields(fields []Field) ([]Field, error) {

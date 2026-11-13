@@ -8,6 +8,7 @@ import type {
   Devices,
   Field,
   GPUCurves,
+  GPUFileMax,
   HostConn,
   HostStatus,
   Live,
@@ -276,6 +277,41 @@ function sampleTimes(h: MockHost, from: number, to: number): number[] {
 
 // mockConnStart 為預覽頁假設的連線起點; 預覽頁的曲線為合成資料, 不隨連線起點截斷.
 const mockConnStart = Math.floor(now() / step) * step;
+
+// 預覽頁假設寫入中的記錄檔自連線起點前 1 小時開始. liveFileMax 依 internal/monitor 的
+// 規則逐筆累計該記錄檔 (含最新的取樣) 每張 GPU 每個欄位的最大值, 每次查詢只累計上次之後
+// 的新取樣; next 為下一次累計的起點.
+const mockFileStart = mockConnStart - 3600e6;
+const fileMaxFields: Field[] = ["util", "mem_used", "temp", "fan", "power_w", "clock_gpu", "clock_mem"];
+const fileMaxState = new Map<string, { next: number; gpus: GPUFileMax[] }>();
+
+function liveFileMax(h: MockHost): GPUFileMax[] | undefined {
+  const showsData = h.status.state === "connected" || h.status.state === "reconnecting";
+  const devs = h.devices?.gpus ?? [];
+  if (!showsData || devs.length === 0) {
+    return undefined;
+  }
+  let st = fileMaxState.get(h.status.id);
+  if (!st) {
+    st = { next: mockFileStart, gpus: devs.map((g) => ({ id: g.id, fields: {} })) };
+    fileMaxState.set(h.status.id, st);
+  }
+  const last = lastTime(h);
+  for (const t of sampleTimes(h, st.next, last)) {
+    devs.forEach((g, i) => {
+      const fields = st.gpus[i].fields;
+      for (const f of fileMaxFields) {
+        const v = value(h, g, f, t);
+        const m = fields[f];
+        if (v !== null && (m === undefined || v > m)) {
+          fields[f] = v;
+        }
+      }
+    });
+  }
+  st.next = Math.max(st.next, last + 1);
+  return st.gpus.map((g) => ({ id: g.id, fields: { ...g.fields } }));
+}
 
 function makeLive(h: MockHost): Live {
   const t = lastTime(h);
@@ -676,7 +712,10 @@ export const backend: Backend = {
     return makeLive(find(id));
   },
   async query(id, from, to, width, fields, stats) {
-    return query(find(id), from, to, width, fields, stats);
+    const h = find(id);
+    const res = query(h, from, to, width, fields, stats);
+    const fileMax = liveFileMax(h);
+    return fileMax ? { ...res, file_max: fileMax } : res;
   },
   async chooseKeyFile() {
     return "~/.ssh/lab_ed25519";

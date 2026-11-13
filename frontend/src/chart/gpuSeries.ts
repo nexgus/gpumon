@@ -86,11 +86,19 @@ function round(v: number | null | undefined): number | null {
   return v === null || v === undefined ? null : Math.round(v);
 }
 
+// FileMaxValues 為單張 GPU 各欄位於整個記錄檔的最大值 (原始取樣值).
+export type FileMaxValues = Partial<Record<Field, number>>;
+
 // gpuSeries 回傳一張 GPU 的曲線. 使用率與記憶體佔比以 0 至 100 為縱軸; 加選的曲線依
 // 規格 6.2 的滿刻度規則換算: 溫度以 100 度, 風扇轉速以 100%, 功耗與時脈以 devices
-// 訊息的上限為滿刻度; 顯示範圍內的值超過滿刻度, 或取不到上限時, 改以顯示範圍內的
-// 最大值為滿刻度, 圖例標示該值. 取不到記憶體總量時不畫記憶體佔比; 加選的曲線於顯示
-// 範圍內完全沒有值時不畫.
+// 訊息的上限為滿刻度; 整檔最大值超過上限, 或取不到上限時, 改以整檔最大值為滿刻度,
+// 圖例標示該值. 滿刻度因此不隨顯示範圍改變.
+//
+// fileMax 為該 GPU 的整檔最大值: undefined 表示查詢中, 此時不畫加選的曲線; null 表示查詢
+// 失敗, 此時以顯示範圍內的最大值代替整檔最大值; 欄位缺值時亦以顯示範圍內的最大值代替.
+// 顯示範圍內的值超過依上述規則所得的滿刻度時 (例如最新的整檔最大值尚未送達), 改以兩者
+// 較大者為滿刻度, 使曲線不超出繪圖區. 取不到記憶體總量時不畫記憶體佔比; 加選的曲線於
+// 顯示範圍內完全沒有值時不畫.
 export function gpuSeries(
   res: QueryResult,
   gpuID: number,
@@ -98,6 +106,7 @@ export function gpuSeries(
   curves: Curve[],
   units: SizeUnits,
   t: Translator,
+  fileMax: FileMaxValues | null | undefined,
 ): ChartSeries[] {
   const g = res.gpus?.find((x) => x.id === gpuID);
   const out: ChartSeries[] = [];
@@ -146,7 +155,7 @@ export function gpuSeries(
       });
       continue;
     }
-    if (!hasValue(d)) {
+    if (fileMax === undefined || !hasValue(d)) {
       continue;
     }
     const unitKey = c === "temp" ? "unit.celsius" : c === "fan" ? "unit.percent" : c === "power" ? "unit.watt" : "unit.mhz";
@@ -158,13 +167,18 @@ export function gpuSeries(
           : c === "clock_gpu"
             ? device?.clock_gpu_max
             : device?.clock_mem_max;
-    const peak = maxOf(d?.max, avg) ?? 0;
-    const fallback = !limit || peak > limit;
-    const full = Math.max(1, fallback ? Math.ceil(peak) : (limit as number));
+    const inView = maxOf(d?.max, avg) ?? 0;
+    const peak = fileMax?.[curveField[c]] ?? inView;
+    let fallback = !limit || peak > limit;
+    let full = Math.max(1, fallback ? Math.ceil(peak) : (limit as number));
+    if (inView > full) {
+      fallback = true;
+      full = Math.max(1, Math.ceil(Math.max(inView, peak)));
+    }
     const fullText = t(unitKey, { value: full });
     out.push({
       ...base,
-      scaleLabel: fallback ? t("legend.maxInView", { value: fullText }) : fullText,
+      scaleLabel: fallback ? t("legend.maxInRecording", { value: fullText }) : fullText,
       avg: scaled(avg, full) as SeriesValues,
       min: scaled(d?.min, full),
       max: scaled(d?.max, full),

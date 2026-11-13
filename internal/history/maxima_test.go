@@ -200,3 +200,34 @@ func TestSampleAtInterval(t *testing.T) {
 		}
 	}
 }
+
+func TestMaxTracker(t *testing.T) {
+	m := NewMaxTracker([]int{3, 1, 3})
+	if got := m.Result(); len(got) != 2 || got[0].ID != 1 || got[1].ID != 3 || len(got[0].Fields) != 0 {
+		t.Fatalf("empty tracker %+v", got)
+	}
+	none := recording.GPUValues{
+		Util: recording.NoValue8, Fan: recording.NoValue8, Enc: recording.NoValue8, Dec: recording.NoValue8,
+		Temp: recording.NoValueI16, PowerW: recording.NoValue16, ClockGPU: recording.NoValue16,
+		ClockMem: recording.NoValue16, MemUsed: recording.NoValue64,
+	}
+	sample := func(util0, temp1 uint8) *recording.Record {
+		g0, g1, g2 := none, none, none
+		g0.ID, g0.Util = 3, util0
+		g1.ID, g1.Temp = 1, int16(temp1)
+		g2.ID, g2.Util = 3, 99
+		return &recording.Record{Kind: recording.KindSample, GPUs: []recording.GPUValues{g0, g1, g2}}
+	}
+	m.Add(sample(20, 50))
+	m.Add(sample(60, 40))
+	m.Add(&recording.Record{Kind: recording.KindDisconnect})
+	m.Add(sample(30, 70))
+	got := m.Result()
+	want := []GPUFileMax{
+		{ID: 1, Fields: map[Field]float64{FieldTemp: 70}},
+		{ID: 3, Fields: map[Field]float64{FieldUtil: 60}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}

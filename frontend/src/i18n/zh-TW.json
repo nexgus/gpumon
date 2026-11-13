@@ -64,7 +64,7 @@
   "legend.power": "功耗",
   "legend.clock_gpu": "GPU 時脈",
   "legend.clock_mem": "記憶體時脈",
-  "legend.maxInView": "{value}，顯示範圍內的最大值",
+  "legend.maxInRecording": "{value}，記錄檔內的最大值",
 
   "readout.util": "使用率",
   "readout.mem": "記憶體",

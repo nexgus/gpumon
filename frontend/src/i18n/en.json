@@ -67,7 +67,7 @@
   "legend.power": "Power",
   "legend.clock_gpu": "GPU clock",
   "legend.clock_mem": "Mem clock",
-  "legend.maxInView": "{value} max in view",
+  "legend.maxInRecording": "{value} max in recording",
 
   "readout.util": "UTIL",
   "readout.mem": "MEM",

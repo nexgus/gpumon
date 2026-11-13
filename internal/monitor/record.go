@@ -24,6 +24,9 @@ const maxMessageBytes = 1024
 // 取樣先寫入 recording.Writer 的緩衝, 並於 pending 保留一份緊湊的副本, 供曲線
 // 查詢合併尚未存檔的取樣; 每次 flush 後清空 pending. flushMu 使查詢期間不進行
 // flush, 確保查詢所讀的檔案內容與 pending 不重疊也不缺漏.
+//
+// peaks 累計寫入中記錄檔自建立以來的全部取樣, 供曲線查詢附上整個記錄檔的最大值. 自動
+// 重新連線而接續原記錄檔時沿用, 因此涵蓋重新連線之前的取樣; 建立新檔時重新累計.
 type recorder struct {
 	dataDir string
 	log     *slog.Logger
@@ -33,6 +36,7 @@ type recorder struct {
 	mu      sync.Mutex
 	w       *recording.Writer
 	pending []recording.Record
+	peaks   *history.MaxTracker
 }
 
 func newRecorder(dataDir string, log *slog.Logger) *recorder {
@@ -87,6 +91,7 @@ func (r *recorder) begin(cs connStart) {
 		return
 	}
 	r.w = w
+	r.peaks = history.NewMaxTracker(w.GPUIDs())
 }
 
 // addSample 加入一筆取樣與一筆程序記錄, 回傳記錄檔所用的時刻; 沒有記錄檔
@@ -109,6 +114,7 @@ func (r *recorder) addSample(ts float64, intervalMS int, gpus []protocol.GPUSamp
 	r.pending = append(r.pending, recording.Record{
 		Kind: recording.KindSample, Time: t, IntervalMS: clampU16(intervalMS), GPUs: gpuValues(r.w.GPUIDs(), rs),
 	})
+	r.peaks.Add(&r.pending[len(r.pending)-1])
 	if err := r.w.AddProcesses(ts, procs); err != nil {
 		r.log.Warn("cannot record processes", "err", err)
 	}
@@ -163,6 +169,7 @@ func (r *recorder) closeLocked() {
 	}
 	r.w = nil
 	r.pending = nil
+	r.peaks = nil
 }
 
 // path 回傳寫入中的記錄檔路徑; 沒有時為空字串.
@@ -175,8 +182,8 @@ func (r *recorder) path() string {
 	return r.w.Path()
 }
 
-// query 查詢寫入中的記錄檔並合併尚未存檔的取樣; 沒有寫入中的記錄檔時回傳空的結果.
-// 查詢期間暫停 flush. r 為 nil 時視為沒有記錄檔.
+// query 查詢寫入中的記錄檔並合併尚未存檔的取樣, 並附上整個記錄檔的最大值; 沒有寫入中
+// 的記錄檔時回傳空的結果. 查詢期間暫停 flush. r 為 nil 時視為沒有記錄檔.
 func (r *recorder) query(ctx context.Context, q history.Query) (*history.Result, error) {
 	if r == nil {
 		return history.QueryRange(ctx, nil, q)
@@ -186,13 +193,20 @@ func (r *recorder) query(ctx context.Context, q history.Query) (*history.Result,
 	r.mu.Lock()
 	var paths []string
 	var pending []history.Pending
+	var peaks []history.GPUFileMax
 	if r.w != nil {
 		cur := r.w.Path()
 		paths = []string{cur}
 		pending = []history.Pending{{Path: cur, Records: slices.Clone(r.pending)}}
+		peaks = r.peaks.Result()
 	}
 	r.mu.Unlock()
-	return history.QueryRangePending(ctx, paths, pending, q)
+	res, err := history.QueryRangePending(ctx, paths, pending, q)
+	if err != nil {
+		return nil, err
+	}
+	res.FileMax = peaks
+	return res, nil
 }
 
 func i64(v *int) *int64 {

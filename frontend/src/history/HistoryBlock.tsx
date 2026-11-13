@@ -1,9 +1,9 @@
 import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { backend } from "../api/backend";
-import type { Curve, Device, Field, LiveGPU, LiveProcess, QueryResult, RecordingInfo } from "../api/types";
+import type { Curve, Device, Field, FieldMax, LiveGPU, LiveProcess, QueryResult, RecordingInfo, RecordingMaxima } from "../api/types";
 import type { ChartEdge, ChartGap, ChartLegendExtra, ChartMarks } from "../chart/Chart";
 import { createHoverStore } from "../chart/hoverStore";
-import { gpuSeries, toChartData } from "../chart/gpuSeries";
+import { gpuSeries, toChartData, type FileMaxValues } from "../chart/gpuSeries";
 import { formatClock } from "../format";
 import { useT } from "../i18n";
 import { setGPUCollapsed, setMaximaCollapsed, setProcessesCollapsed, useSizeUnits, type MaxSelection } from "../state/app";
@@ -22,6 +22,20 @@ const noDevices: Device[] = [];
 const noProcs: LiveProcess[] = [];
 // 歷史畫面的曲線圖共用的滑鼠狀態.
 const hoverStore = createHoverStore();
+
+// fileMaxOf 取出一張 GPU 各欄位的整檔最大值, 供 gpuSeries 決定滿刻度; undefined 與 null
+// 沿用 useMaxima 的意義, 分別為查詢中與查詢失敗.
+function fileMaxOf(maxima: RecordingMaxima | null | undefined, gpu: number): FileMaxValues | null | undefined {
+  if (!maxima) {
+    return maxima;
+  }
+  const out: FileMaxValues = {};
+  const fields = maxima.gpus.find((g) => g.id === gpu)?.fields ?? {};
+  for (const [f, m] of Object.entries(fields) as [Field, FieldMax][]) {
+    out[f] = m.value;
+  }
+  return out;
+}
 
 function queryRecording(path: string, from: number, to: number, width: number, fields: Field[]): Promise<QueryResult | null> {
   return backend.queryRecording(path, from, to, width, fields);
@@ -117,11 +131,11 @@ export const HistoryBlock = memo(function HistoryBlock({
     const m = new Map<number, ReturnType<typeof gpuSeries>>();
     if (result) {
       for (const g of gpus) {
-        m.set(g.id, gpuSeries(result, g.id, g, curves, units, t));
+        m.set(g.id, gpuSeries(result, g.id, g, curves, units, t, fileMaxOf(maxima, g.id)));
       }
     }
     return m;
-  }, [result, gpus, curves, units, t]);
+  }, [result, gpus, curves, units, t, maxima]);
 
   // 選取最大值時, 該 GPU 的曲線圖頂端標出該欄位的所有出現處, 圖例最後加一項說明.
   const selMax = maxSel ? findMax(maxima, maxSel.gpu, maxSel.field) : undefined;

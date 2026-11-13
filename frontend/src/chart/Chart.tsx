@@ -172,6 +172,13 @@ interface Hover {
   line: boolean;
 }
 
+// 重疊的曲線輪流上色時, 每個色段沿橫軸的長度 (CSS 像素); 不隨縮放或顯示範圍改變.
+const OVERLAP_STRIPE = 10;
+// 曲線線寬 (CSS 像素), 亦為判定兩條曲線於畫面上重疊的垂直距離門檻.
+const LINE_WIDTH = 1.5;
+// 重疊判定以位元遮罩記錄同組成員, 曲線數超過此值時不進行輪流上色.
+const MAX_OVERLAP_SERIES = 16;
+
 function isBreak(breaks: Set<number>, i: number): boolean {
   return breaks.has(i);
 }
@@ -179,6 +186,109 @@ function isBreak(breaks: Set<number>, i: number): boolean {
 // pointTime 回傳第 i 點於橫軸上的時刻; 降採樣時取像素範圍的中點.
 function pointTime(d: ChartData, i: number): number {
   return d.binned ? d.times[i] + d.binSpan / 2 : d.times[i];
+}
+
+// overlapMasks 判定每個線段 (第 i 點至第 i+1 點) 上各曲線於畫面上是否重疊, 回傳以 "曲線序 * 點數 + i" 索引的位元遮罩.
+// 遮罩為該線段上與此曲線同組的所有曲線 (含自身) 的位元, 0 表示未與其他曲線重疊; 無任何重疊時回傳 null.
+// 兩條曲線在線段兩端的垂直距離皆小於線寬即為重疊, 依左端縱座標排序後相鄰者符合條件即歸入同一組.
+function overlapMasks(
+  series: ChartSeries[],
+  n: number,
+  breaks: Set<number>,
+  yOf: (v: number) => number,
+): Uint16Array | null {
+  const m = series.length;
+  if (m < 2 || m > MAX_OVERLAP_SERIES || n < 2) {
+    return null;
+  }
+  const ys = series.map((s) => {
+    const y = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      const v = s.avg[i];
+      y[i] = v === null || v === undefined ? NaN : yOf(v);
+    }
+    return y;
+  });
+  let out: Uint16Array | null = null;
+  const act = new Int8Array(m);
+  for (let i = 0; i < n - 1; i++) {
+    if (isBreak(breaks, i)) {
+      continue;
+    }
+    let c = 0;
+    for (let k = 0; k < m; k++) {
+      if (Number.isNaN(ys[k][i]) || Number.isNaN(ys[k][i + 1])) {
+        continue;
+      }
+      let j = c++;
+      while (j > 0 && ys[act[j - 1]][i] > ys[k][i]) {
+        act[j] = act[j - 1];
+        j--;
+      }
+      act[j] = k;
+    }
+    let runStart = 0;
+    for (let j = 1; j <= c; j++) {
+      const joined =
+        j < c &&
+        Math.abs(ys[act[j]][i] - ys[act[j - 1]][i]) < LINE_WIDTH &&
+        Math.abs(ys[act[j]][i + 1] - ys[act[j - 1]][i + 1]) < LINE_WIDTH;
+      if (joined) {
+        continue;
+      }
+      if (j - runStart >= 2) {
+        let mask = 0;
+        for (let q = runStart; q < j; q++) {
+          mask |= 1 << act[q];
+        }
+        if (!out) {
+          out = new Uint16Array(m * n);
+        }
+        for (let q = runStart; q < j; q++) {
+          out[act[q] * n + i] = mask;
+        }
+      }
+      runStart = j;
+    }
+  }
+  return out;
+}
+
+// drawStripes 以 mask 內各曲線的顏色沿橫軸輪流畫出一條線段, 色段長度固定為 OVERLAP_STRIPE.
+// shiftIdx 與 shiftFrac 為顯示範圍左緣的絕對位移 (整數個色段與餘數), 使色段跟隨時刻移動.
+function drawStripes(
+  ctx: CanvasRenderingContext2D,
+  mask: number,
+  colors: string[],
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  shiftIdx: number,
+  shiftFrac: number,
+): void {
+  const members: number[] = [];
+  for (let k = 0; mask >> k !== 0; k++) {
+    if (mask & (1 << k)) {
+      members.push(k);
+    }
+  }
+  const cnt = members.length;
+  const dx = x1 - x0;
+  let x = x0;
+  let cell = Math.floor((x0 + shiftFrac) / OVERLAP_STRIPE);
+  ctx.lineCap = "butt";
+  while (x < x1) {
+    const end = Math.min(x1, (cell + 1) * OVERLAP_STRIPE - shiftFrac);
+    const abs = shiftIdx + cell;
+    ctx.strokeStyle = colors[members[((abs % cnt) + cnt) % cnt]];
+    ctx.beginPath();
+    ctx.moveTo(x, dx > 0 ? y0 + ((y1 - y0) * (x - x0)) / dx : y0);
+    ctx.lineTo(end, dx > 0 ? y0 + ((y1 - y0) * (end - x0)) / dx : y1);
+    ctx.stroke();
+    x = end;
+    cell++;
+  }
 }
 
 function draw(
@@ -257,6 +367,13 @@ function draw(
     return out;
   };
 
+  const colors = series.map((s) => cssVar(canvas, s.color));
+  const overlap = overlapMasks(series, n, breaks, yOf);
+  // 色段相位錨定於絕對時刻: 顯示範圍左緣的絕對像素位移拆成整數個色段與餘數, 以免大數相加損失精度.
+  const shift = (from / span) * width;
+  const shiftIdx = Math.floor(shift / OVERLAP_STRIPE);
+  const shiftFrac = shift - shiftIdx * OVERLAP_STRIPE;
+
   for (const s of series) {
     const color = cssVar(canvas, s.color);
     if (data.binned && s.min && s.max) {
@@ -289,8 +406,10 @@ function draw(
     }
     ctx.strokeStyle = color;
     ctx.fillStyle = color;
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = LINE_WIDTH;
     ctx.lineJoin = "round";
+    const sk = series.indexOf(s);
+    const base = sk * n;
     for (const [a, b] of segments(s.avg)) {
       if (a === b) {
         ctx.beginPath();
@@ -298,12 +417,31 @@ function draw(
         ctx.fill();
         continue;
       }
-      ctx.beginPath();
-      ctx.moveTo(xs[a], yOf(s.avg[a] as number));
-      for (let i = a + 1; i <= b; i++) {
-        ctx.lineTo(xs[i], yOf(s.avg[i] as number));
+      let open = false;
+      for (let i = a; i < b; i++) {
+        const mask = overlap ? overlap[base + i] : 0;
+        if (mask === 0) {
+          if (!open) {
+            ctx.beginPath();
+            ctx.moveTo(xs[i], yOf(s.avg[i] as number));
+            open = true;
+          }
+          ctx.lineTo(xs[i + 1], yOf(s.avg[i + 1] as number));
+          continue;
+        }
+        if (open) {
+          ctx.stroke();
+          open = false;
+        }
+        if ((mask & -mask) !== 1 << sk) {
+          continue;
+        }
+        drawStripes(ctx, mask, colors, xs[i], yOf(s.avg[i] as number), xs[i + 1], yOf(s.avg[i + 1] as number), shiftIdx, shiftFrac);
+        ctx.strokeStyle = color;
       }
-      ctx.stroke();
+      if (open) {
+        ctx.stroke();
+      }
     }
   }
 

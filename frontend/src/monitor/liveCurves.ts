@@ -3,7 +3,7 @@
 // 完整像素範圍, 使右緣前進時各像素範圍的邊界不變, 新取樣只需併入最後一個像素範圍,
 // 左側離開顯示範圍的像素範圍整個移除. 依此併入的結果與以同一組像素範圍重新查詢的結果
 // 相同 (降採樣規則與無資料時段規則見 internal/history 的 QueryRange).
-import type { Field, Gap, GPUCurves, QueryResult, SeriesData } from "../api/types";
+import type { Field, Gap, GPUCurves, GPUFileMax, QueryResult, SeriesData } from "../api/types";
 
 // tailWidth 為查詢新取樣時的像素寬度. 新取樣多於此數時查詢結果改為降採樣, 呼叫端改為
 // 重新查詢整段顯示範圍.
@@ -49,6 +49,8 @@ export interface LiveState {
   series: Series[][];
   breaks: number[];
   gaps: Gap[];
+  // fileMax 為最近一次查詢結果所附的整檔最大值, 每次併入新取樣時以該次查詢的結果取代.
+  fileMax: GPUFileMax[] | null;
 }
 
 function num(v: number | null | undefined): number | null {
@@ -90,6 +92,7 @@ export function fromResult(res: QueryResult, grid: Grid, fields: Field[]): LiveS
     series,
     breaks: (res.breaks ?? []).map((i) => i + grid.first),
     gaps: (res.gaps ?? []).slice(),
+    fileMax: res.file_max ?? null,
   };
 }
 
@@ -194,6 +197,10 @@ export function merge(st: LiveState, tail: QueryResult | null, next: Grid): bool
     st.last = prev;
   }
 
+  if (tail?.file_max) {
+    st.fileMax = tail.file_max;
+  }
+
   // 移除左側離開顯示範圍的像素範圍.
   const drop = next.first - g.first;
   if (drop > 0) {
@@ -245,5 +252,6 @@ export function toResult(st: LiveState): QueryResult {
       return { id, fields };
     }),
     gaps: st.gaps.slice(),
+    file_max: st.fileMax,
   };
 }
