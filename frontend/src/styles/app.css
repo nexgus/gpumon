@@ -114,7 +114,6 @@ button:disabled {
 
 .btn:focus-visible,
 .segmented button:focus-visible,
-.host-tab:focus-visible,
 .side-nav-item:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
@@ -316,46 +315,150 @@ button:disabled {
   color: var(--accent);
 }
 
-.host-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
+/* 資料夾式分頁, 監看畫面與關於視窗共用. 分頁列 (.tabbar) 底端有一條分隔線, 分頁立於其上;
+   選取中的分頁與下方內容區同底色, 分隔線於該處中斷, 頂端為強調色的線. */
+.tabbar {
+  align-items: flex-end;
+  background: var(--surface-2);
+  box-shadow: inset 0 -1px 0 var(--border);
 }
 
-.host-tab {
+.toolbar.tabbar {
+  flex-wrap: nowrap;
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+/* 縮放控制項與分頁垂直置中對齊. */
+.tabbar > .zoom-group {
+  flex: none;
+  margin-bottom: 3px;
+}
+
+/* 分頁過多時分頁列左右捲動, 捲軸永遠顯示於分頁上方, 分頁與下方內容區因此維持相連. 做法為把
+   分頁列上下翻轉, 再把各分頁翻轉回來; 翻轉後的起始端即畫面上的底端. */
+.tabs {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+  transform: scaleY(-1);
+}
+
+.tabs > * {
+  transform: scaleY(-1);
+}
+
+.tabs::-webkit-scrollbar {
+  height: 6px;
+}
+
+.tabs::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tabs::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: var(--border-strong);
+}
+
+.tabs::-webkit-scrollbar-thumb:hover {
+  background: var(--text-3);
+}
+
+.tab {
+  flex: none;
   display: flex;
   align-items: center;
-  gap: 6px;
-  height: 30px;
-  padding: 0 10px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
+  height: 34px;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 7px 7px 0 0;
+  background: var(--surface);
   color: var(--text-2);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 400;
 }
 
-.host-tab[aria-selected="true"] {
-  border-bottom-color: var(--accent);
+.tab:hover {
+  color: var(--text);
+}
+
+.tab.selected {
+  border-color: var(--border-strong);
+  border-top: 2px solid var(--accent);
+  border-bottom-color: var(--bg);
+  background: var(--bg);
   color: var(--text);
   font-weight: 600;
 }
 
-.tab-count {
-  min-width: 18px;
-  padding: 0 6px;
-  border-radius: 9px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 18px;
-  text-align: center;
+.tab-label {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px 6px 0 0;
+  background: transparent;
+  font-size: 12.5px;
+  font-weight: inherit;
+  white-space: nowrap;
 }
 
-/* 縮放控制項: 縮小按鍵與放大按鍵, 兩者以分隔線隔開. */
+.tab-label .mono {
+  font-size: 12px;
+}
+
+.tab.closable .tab-label {
+  padding-right: 4px;
+}
+
+.tab-label:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.tab-close {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-right: 8px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-2);
+}
+
+.tab-close:hover {
+  background: color-mix(in srgb, var(--text) 14%, transparent);
+  color: var(--text);
+}
+
+.tab-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* 縮放控制項: 標籤與其右側的外框. */
+.zoom-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.zoom-label {
+  color: var(--text-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* 外框內為縮小按鍵, 範圍長度與放大按鍵, 三者以分隔線隔開. */
 .zoom {
   display: inline-flex;
   align-items: center;
@@ -388,8 +491,20 @@ button:disabled {
   outline-offset: -2px;
 }
 
-.zoom-btn + .zoom-btn {
+/* 範圍長度只供顯示, 欄寬固定以容納最長的文字, 兩側按鍵不隨文字長短移動. */
+.zoom-span {
+  align-self: stretch;
+  width: 92px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-left: 1px solid var(--border-strong);
+  border-right: 1px solid var(--border-strong);
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: default;
+  user-select: none;
 }
 
 .select {
@@ -1516,6 +1631,70 @@ button:disabled {
 .rec-row.muted .rec-duration,
 .rec-row.muted .rec-size {
   color: var(--text-3);
+}
+
+/* 記錄檔第一層的主機清單. 每列為一個按鍵, 列與列之間以分隔線隔開. */
+.rec-hostrow {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.rec-hosts > li + li {
+  border-top: 1px solid var(--border);
+}
+
+.rec-hosts > li:first-child .rec-hostrow {
+  border-radius: 8px 8px 0 0;
+}
+
+.rec-hosts > li:last-child .rec-hostrow {
+  border-radius: 0 0 8px 8px;
+}
+
+.rec-hostrow:hover {
+  background: var(--surface-2);
+}
+
+.rec-hostrow:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.rec-hostrow > .rec-host,
+.rec-hostrow > .rec-title {
+  min-width: 0;
+}
+
+.rec-hostrow > svg {
+  flex: none;
+  color: var(--text-3);
+}
+
+.rec-files {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.sel-count {
+  flex: none;
+  padding: 0 7px;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
 }
 
 /* 歷史畫面. */

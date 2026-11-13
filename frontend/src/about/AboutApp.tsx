@@ -4,6 +4,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { backend } from "../api/backend";
 import type { AboutInfo, AboutTabName } from "../api/types";
+import { Tab, TabList } from "../components/Tabs";
 import { formatDateTime } from "../format";
 import { useT, type Translator } from "../i18n";
 import appIcon from "./app-icon.png";
@@ -198,19 +199,14 @@ export function AboutApp({ initialTab }: { initialTab: AboutTabName }) {
   ];
   return (
     <div className="about">
-      <div role="tablist" className="about-tabs">
-        {tabs.map(([name, label]) => (
-          <button
-            key={name}
-            type="button"
-            role="tab"
-            aria-selected={tab === name}
-            className="about-tab"
-            onClick={() => setTab(name)}
-          >
-            {label}
-          </button>
-        ))}
+      <div className="tabbar about-tabs">
+        <TabList selectedKey={tab}>
+          {tabs.map(([name, label]) => (
+            <Tab key={name} selected={tab === name} onSelect={() => setTab(name)}>
+              {label}
+            </Tab>
+          ))}
+        </TabList>
       </div>
       {tab === "about" ? <AboutPanel /> : <LicensesPanel />}
     </div>

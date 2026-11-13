@@ -2,14 +2,16 @@
 // 以 npx vite --config vite.preview.config.ts 啟動, 開啟 /preview.html. 網址參數:
 //   theme=light|dark, lang=en|zh-TW, span=<監看畫面的顯示範圍長度, 毫秒>, curves=util,mem,...,
 //   collapse=1 (收合 GPU 2), pcollapse=1 (收合第一台主機的程序卡片), mcollapse=1 (收合第一台主機
-//   的最大值卡片), host=<n> (切換至第 n 個主機分頁, 自 0 起), scenario=design|empty|nogpu, live=0 (不送新取樣),
+//   的最大值卡片), host=<n> (切換至第 n 個主機分頁, 自 0 起), exhaust=1 (一秒後 alice@gpu-lab-02 由
+//   重新連線中因重試用盡轉為未連線), scenario=design|empty|nogpu, live=0 (不送新取樣),
 //   now=<Unix 秒> (固定目前時刻), dialog=add|edit|delete|password|passphrase|errors|upload|update|queue
 //   (queue 依序送出上傳通知, 錯誤與密碼輸入要求, 只顯示第一個; next=<n> 依序按下前 n 個視窗的主要按鍵),
 //   hover=<0 至 1> (於第 n 張曲線圖的該位置懸停, 歷史畫面中靠近 0 或 1 即位於邊緣區), hoverChart=<n>, pin=<0 至 1> (於第 n 張曲線圖
 //   的該位置點選以固定時刻, n 為 hoverChart),
 //   page=recordings|history|settings (顯示該畫面), hspan=<歷史畫面的顯示範圍長度, 毫秒>, hall=1 (歷史畫面
 //   處於顯示全部狀態),
-//   select=all|<記錄檔清單由上而下的列號, 以逗號分隔, 自 0 起> (選取), openrec=1 (按 Open,
+//   rhost=<n> (進入記錄檔第一層第 n 列的第二層, 自 0 起; 指定 select, openrec, confirmdelete 或
+//   page=history 而未指定時為 0), select=all|<第二層由上而下的列號, 以逗號分隔, 自 0 起> (選取), openrec=1 (按 Open,
 //   顯示歷史畫面), confirmdelete=1 (按 Delete, 顯示確認視窗), dialog=quit (結束確認視窗, count=<主機數>, 預設 2),
 //   window=about (關於視窗, 以 600 x 600 的視窗檢視; tab=about|licenses,
 //   platform=windows 顯示 Windows 的資訊, jump=<n> 點選第三方授權分頁表中第 n 個授權種類),
@@ -160,7 +162,16 @@ function scenario(): void {
   }
   const host = params.get("host");
   if (host !== null) {
-    click(".host-tab", Number(host));
+    click(".tab-label", Number(host));
+  }
+  if (params.get("exhaust") === "1") {
+    later(() => {
+      const h = mock.hosts.find((x) => x.status.id === "alice@gpu-lab-02");
+      if (h) {
+        h.status = { ...h.status, state: "disconnected", retries: 0 };
+        mock.emit("monitor:host", { ...h.status });
+      }
+    }, 1000);
   }
   const page = params.get("page");
   if (page === "settings") {
@@ -168,6 +179,11 @@ function scenario(): void {
   }
   if (page === "recordings" || page === "history") {
     click(".side-nav-item", 0);
+    const files = ["select", "openrec", "confirmdelete"].some((k) => params.has(k)) || page === "history";
+    const rhost = params.get("rhost") ?? (files ? "0" : null);
+    if (rhost !== null) {
+      later(() => click(".rec-hostrow", Number(rhost)), 150);
+    }
     later(() => {
       const select = params.get("select");
       if (select === "all") {

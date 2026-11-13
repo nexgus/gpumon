@@ -68,7 +68,10 @@ export const HostBlock = memo(function HostBlock(p: HostBlockProps) {
   if (!showsCards) {
     let note: string;
     if (host.state === "disconnected") {
-      note = t("monitor.notConnected");
+      // 重試用盡而保留的分頁顯示斷線原因.
+      note = host.reason
+        ? t("monitor.disconnectedRetries", { max: host.max_retries, reason: host.reason })
+        : t("monitor.notConnected");
     } else if (host.state === "connecting") {
       note = t("monitor.connecting");
     } else if (devices && gpus.length === 0) {

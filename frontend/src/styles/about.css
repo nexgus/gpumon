@@ -14,35 +14,11 @@
   color: var(--text);
 }
 
+/* 切換列固定於視窗頂端, 分頁樣式由 app.css 的資料夾式分頁提供. */
 .about-tabs {
   flex: none;
   display: flex;
-  gap: 2px;
-  padding: 0 16px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-}
-
-.about-tab {
-  height: 38px;
-  padding: 0 10px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--text-2);
-  font-size: 12.5px;
-  font-weight: 500;
-}
-
-.about-tab[aria-selected="true"] {
-  border-bottom-color: var(--accent);
-  color: var(--text);
-  font-weight: 600;
-}
-
-.about-tab:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
+  padding: 8px 16px 0;
 }
 
 .about-content {
