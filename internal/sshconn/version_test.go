@@ -60,15 +60,17 @@ func TestParseVersionOutput(t *testing.T) {
 	good := []struct {
 		in    string
 		ver   string
+		full  string
+		hash  string
 		proto int
 	}{
-		{"gpumon 0.1.0+3f2a9c1 (protocol 1)\n", "0.1.0", 1},
-		{"gpumon 0.2.0-beta.3+3f2a9c1-dirty (protocol 2)\n", "0.2.0-beta.3", 2},
-		{"gpumon 0.1.0+unknown (protocol 1)\n", "0.1.0", 1},
-		{"gpumon 0.1.0+unknown-dirty (protocol 12)", "0.1.0", 12},
-		{"gpumon 0.1.0 (protocol 1)\n", "0.1.0", 1},
-		{"gpumon 0.2.0-rc.1 (protocol 4)", "0.2.0-rc.1", 4},
-		{"gpumon 10.20.30-rc.0+abcdef0 (protocol 3)\n", "10.20.30-rc.0", 3},
+		{"gpumon 0.1.0+3f2a9c1 (protocol 1)\n", "0.1.0", "0.1.0+3f2a9c1", "3f2a9c1", 1},
+		{"gpumon 0.2.0-beta.3+3f2a9c1-dirty (protocol 2)\n", "0.2.0-beta.3", "0.2.0-beta.3+3f2a9c1-dirty", "", 2},
+		{"gpumon 0.1.0+unknown (protocol 1)\n", "0.1.0", "0.1.0+unknown", "", 1},
+		{"gpumon 0.1.0+unknown-dirty (protocol 12)", "0.1.0", "0.1.0+unknown-dirty", "", 12},
+		{"gpumon 0.1.0 (protocol 1)\n", "0.1.0", "0.1.0", "", 1},
+		{"gpumon 0.2.0-rc.1 (protocol 4)", "0.2.0-rc.1", "0.2.0-rc.1", "", 4},
+		{"gpumon 10.20.30-rc.0+abcdef0 (protocol 3)\n", "10.20.30-rc.0", "10.20.30-rc.0+abcdef0", "abcdef0", 3},
 	}
 	for _, c := range good {
 		info, err := ParseVersionOutput(c.in)
@@ -76,8 +78,8 @@ func TestParseVersionOutput(t *testing.T) {
 			t.Errorf("ParseVersionOutput(%q): %v", c.in, err)
 			continue
 		}
-		if info.Version.String() != c.ver || info.Protocol != c.proto {
-			t.Errorf("ParseVersionOutput(%q) = %s, %d", c.in, info.Version, info.Protocol)
+		if info.Version.String() != c.ver || info.Full != c.full || info.Hash != c.hash || info.Protocol != c.proto {
+			t.Errorf("ParseVersionOutput(%q) = %s, %q, %q, %d", c.in, info.Version, info.Full, info.Hash, info.Protocol)
 		}
 	}
 	bad := []string{
@@ -115,28 +117,35 @@ func TestDecideUpload(t *testing.T) {
 	higher := mustVersion(t, "0.3.0-alpha.1")
 	equal := mustVersion(t, "0.2.0")
 	lower := mustVersion(t, "0.2.0-rc.1")
+	const guiHash = "3f2a9c1"
 	rows := []struct {
-		name    string
-		remote  *ProgramVersion
-		running bool
-		want    uploadAction
+		name      string
+		remote    *ProgramVersion
+		hash      string
+		running   bool
+		wantCheck bool
+		want      uploadAction
 	}{
-		{"unknown", nil, false, actionUpload},
-		{"unknown, running is not checked", nil, true, actionUpload},
-		{"equal", &equal, false, actionUseExisting},
-		{"higher", &higher, false, actionUseExisting},
-		{"lower, not running", &lower, false, actionUpload},
-		{"lower, running", &lower, true, actionUseExisting},
+		{"unknown", nil, "", false, false, actionUpload},
+		{"unknown, running is not checked", nil, "", true, false, actionUpload},
+		{"higher", &higher, "", false, false, actionUseExisting},
+		{"higher with other hash", &higher, "0000000", false, false, actionUseExisting},
+		{"equal, same hash", &equal, guiHash, false, false, actionUseExisting},
+		{"equal, same hash, running is not checked", &equal, guiHash, true, false, actionUseExisting},
+		{"equal, other hash, not running", &equal, "0000000", false, true, actionUpload},
+		{"equal, other hash, running", &equal, "0000000", true, true, actionUseExisting},
+		{"equal, no hash, not running", &equal, "", false, true, actionUpload},
+		{"equal, no hash, running", &equal, "", true, true, actionUseExisting},
+		{"lower, not running", &lower, guiHash, false, true, actionUpload},
+		{"lower, running", &lower, guiHash, true, true, actionUseExisting},
 	}
 	for _, r := range rows {
-		got := decideUpload(r.remote, gui)
+		got := decideUpload(r.remote, r.hash, gui, guiHash)
+		if (got == actionCheckRunning) != r.wantCheck {
+			t.Errorf("%s: running check requested = %v, want %v", r.name, got == actionCheckRunning, r.wantCheck)
+		}
 		if got == actionCheckRunning {
-			if r.remote == nil || r.remote.Compare(gui) >= 0 {
-				t.Errorf("%s: running check requested unexpectedly", r.name)
-			}
 			got = decideAfterRunningCheck(r.running)
-		} else if r.remote != nil && r.remote.Compare(gui) < 0 {
-			t.Errorf("%s: running check was not requested", r.name)
 		}
 		if got != r.want {
 			t.Errorf("%s: got %d, want %d", r.name, got, r.want)

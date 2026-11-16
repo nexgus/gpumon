@@ -12,19 +12,30 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gpumon/internal/version"
 )
 
 // fakeRemote 產生假的遠端程式: 一個 shell 腳本, --version 輸出指定的版本與協定
 // 版本, --loop 輸出一行 devices 訊息後讀取 stdin 直到 EOF.
 func fakeRemote(ver string, proto int) []byte {
+	return fakeRemoteSuffix(ver, "+unknown", proto)
+}
+
+// fakeRemoteHash 與 fakeRemote 相同, 但 --version 輸出指定的內容雜湊值.
+func fakeRemoteHash(ver, hash string, proto int) []byte {
+	return fakeRemoteSuffix(ver, "+"+hash, proto)
+}
+
+func fakeRemoteSuffix(ver, suffix string, proto int) []byte {
 	return []byte(fmt.Sprintf(`#!/bin/sh
 case "$1" in
---version) echo "gpumon %s+unknown (protocol %d)"; exit 0;;
+--version) echo "gpumon %s%s (protocol %d)"; exit 0;;
 --loop) echo '{"type":"devices","protocol":%d,"version":"%s","hostname":"fake","gpus":[]}'; echo "args: $*" >&2
   while read line; do :; done; exit 0;;
 esac
 exit 2
-`, ver, proto, proto, ver))
+`, ver, suffix, proto, proto, ver))
 }
 
 type deployFixture struct {
@@ -111,13 +122,48 @@ func TestDeployFlow(t *testing.T) {
 		}
 	}
 
-	// 版號相同, 不上傳也不檢查是否正在執行.
+	// 版號相同且內容雜湊值相同, 不上傳也不檢查是否正在執行.
+	guiHash := version.ContentHash(guiBin)
+	writeFile(t, f.remotePath(), string(fakeRemoteHash("0.2.0", guiHash, 1)), 0o755)
 	dep, err = f.c.Deploy(ctx, opts)
-	if err != nil || dep.Uploaded || dep.Remote == nil || dep.Remote.Version.String() != "0.2.0" {
-		t.Errorf("equal version: %+v %v", dep, err)
+	if err != nil || dep.Uploaded || dep.Remote == nil || dep.Remote.Version.String() != "0.2.0" || dep.Remote.Hash != guiHash {
+		t.Errorf("equal version and hash: %+v %v", dep, err)
 	}
 	if n := f.countCommand("/proc"); n != 0 {
-		t.Errorf("running check executed %d times for equal versions", n)
+		t.Errorf("running check executed %d times for equal hashes", n)
+	}
+
+	// 版號相同, 內容雜湊值不同且正在執行, 不上傳.
+	other := fakeRemoteHash("0.2.0", "0000000", 1)
+	writeFile(t, f.remotePath(), string(other), 0o755)
+	f.procLs = "lrwxrwxrwx 1 u u 0 Nov  5 10:00 /proc/2/exe -> " + f.remotePath() + "\n"
+	dep, err = f.c.Deploy(ctx, opts)
+	if err != nil || dep.Uploaded {
+		t.Errorf("different hash, running: %+v %v", dep, err)
+	}
+	if n := f.countCommand("/proc"); n != 1 {
+		t.Errorf("running check executed %d times for different hashes", n)
+	}
+
+	// 版號相同, 內容雜湊值不同且未執行, 覆寫.
+	f.procLs = ""
+	dep, err = f.c.Deploy(ctx, opts)
+	if err != nil || !dep.Uploaded {
+		t.Errorf("different hash, not running: %+v %v", dep, err)
+	}
+	if data, _ := os.ReadFile(f.remotePath()); string(data) != string(guiBin) {
+		t.Error("program was not overwritten for a different hash")
+	}
+
+	// 版號相同, 遠端沒有內容雜湊值 (+unknown), 正在執行時不上傳, 否則覆寫.
+	writeFile(t, f.remotePath(), string(fakeRemote("0.2.0", 1)), 0o755)
+	f.procLs = "lrwxrwxrwx 1 u u 0 Nov  5 10:00 /proc/2/exe -> " + f.remotePath() + "\n"
+	if dep, err = f.c.Deploy(ctx, opts); err != nil || dep.Uploaded || dep.Remote.Hash != "" {
+		t.Errorf("no hash, running: %+v %v", dep, err)
+	}
+	f.procLs = ""
+	if dep, err = f.c.Deploy(ctx, opts); err != nil || !dep.Uploaded {
+		t.Errorf("no hash, not running: %+v %v", dep, err)
 	}
 
 	// 遠端較高, 不上傳, 協定版本取遠端的值.
@@ -135,7 +181,7 @@ func TestDeployFlow(t *testing.T) {
 	if err != nil || dep.Uploaded || dep.Remote.Version.String() != "0.1.0" {
 		t.Errorf("lower running: %+v %v", dep, err)
 	}
-	if n := f.countCommand("/proc"); n != 1 {
+	if n := f.countCommand("/proc"); n != 5 {
 		t.Errorf("running check executed %d times", n)
 	}
 
@@ -158,14 +204,14 @@ func TestDeployFlow(t *testing.T) {
 	}
 
 	// 遠端協定版本較低, 可用.
-	writeFile(t, f.remotePath(), string(fakeRemote("0.2.0", 1)), 0o755)
+	writeFile(t, f.remotePath(), string(fakeRemoteHash("0.2.0", guiHash, 1)), 0o755)
 	dep, err = f.c.Deploy(ctx, DeployOptions{Binary: guiBin, GUIVersion: "0.2.0", GUIProtocol: 2})
 	if err != nil || dep.Uploaded || dep.Protocol != 1 {
 		t.Errorf("older protocol: %+v %v", dep, err)
 	}
 
 	// 遠端協定版本較高, 不可用.
-	writeFile(t, f.remotePath(), string(fakeRemote("0.2.0", 2)), 0o755)
+	writeFile(t, f.remotePath(), string(fakeRemoteHash("0.2.0", guiHash, 2)), 0o755)
 	_, err = f.c.Deploy(ctx, opts)
 	expectKind(t, err, KindProtocolTooNew)
 	if !strings.Contains(err.Error(), "update GPU Monitor") {
@@ -310,7 +356,7 @@ func TestDeployConfirmUpload(t *testing.T) {
 	if len(rec.reqs) != 1 {
 		t.Fatalf("callback called %d times for a fresh deploy", len(rec.reqs))
 	}
-	want := UploadRequest{Host: f.srv.host, User: "tester", Path: f.remotePath(), Update: false, RemoteVersion: "", NewVersion: "0.2.0"}
+	want := UploadRequest{Host: f.srv.host, User: "tester", Path: f.remotePath(), Update: false, RemoteVersion: "", NewVersion: "0.2.0+" + version.ContentHash(guiBin)}
 	if rec.reqs[0] != want {
 		t.Errorf("fresh request = %+v, want %+v", rec.reqs[0], want)
 	}
@@ -318,7 +364,8 @@ func TestDeployConfirmUpload(t *testing.T) {
 		t.Error("remote directory existed before the confirmation")
 	}
 
-	// 版號相同, 遠端較高, 遠端較低且正在執行: 皆不呼叫.
+	// 版號與內容雜湊值皆相同, 遠端較高, 遠端較低且正在執行: 皆不呼叫.
+	writeFile(t, f.remotePath(), string(fakeRemoteHash("0.2.0", version.ContentHash(guiBin), 1)), 0o755)
 	if _, err := f.c.Deploy(ctx, opts); err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +392,7 @@ func TestDeployConfirmUpload(t *testing.T) {
 	if len(rec.reqs) != 2 {
 		t.Fatalf("callback called %d times", len(rec.reqs))
 	}
-	want = UploadRequest{Host: f.srv.host, User: "tester", Path: f.remotePath(), Update: true, RemoteVersion: "0.1.0-rc.2", NewVersion: "0.2.0"}
+	want = UploadRequest{Host: f.srv.host, User: "tester", Path: f.remotePath(), Update: true, RemoteVersion: "0.1.0-rc.2+unknown", NewVersion: "0.2.0+" + version.ContentHash(guiBin)}
 	if rec.reqs[1] != want {
 		t.Errorf("update request = %+v, want %+v", rec.reqs[1], want)
 	}

@@ -104,7 +104,7 @@ fi
 if ! COMMIT=$(bash scripts/product_commit.sh 2>/dev/null); then
     COMMIT=unknown
 fi
-# 完整版本字串與 version.Full() 相同, commit 為 unknown 時不含 "+<commit>" 一段.
+# GUI 的完整版本字串與 version.Full() 相同, commit 為 unknown 時不含 "+<commit>" 一段.
 if [ "$COMMIT" = unknown ]; then
     FULLVER="$VER"
 else
@@ -273,8 +273,8 @@ echo "Archiving previous outputs..."
 archive_old_outputs
 
 echo "Building remote program (linux/amd64)..."
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath \
-    -ldflags "-s -w ${VERLD}" -o "$OUT_DIR/$CLI_OUT" ./cmd/cli
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -buildvcs=false \
+    -ldflags "-s -w" -o "$OUT_DIR/$CLI_OUT" ./cmd/cli
 cp "$OUT_DIR/$CLI_OUT" internal/remotebin/gpumon.bin
 
 echo "Generating frontend bindings..."

@@ -25,8 +25,9 @@ type ProgramVersion struct {
 var programVersionRE = regexp.MustCompile(
 	`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?$`)
 
-// versionOutputRE 為規格 5.7 所定 --version 輸出的正規表示式. 沒有 commit 時不含
-// "+<commit>" 一段; 舊版的遠端程式以 "+unknown" 表示, 一併接受.
+// versionOutputRE 為規格 5.7 所定 --version 輸出的正規表示式. 讀取內容雜湊值失敗時
+// 不含 "+<內容雜湊值>" 一段; 舊版的遠端程式於該位置輸出 commit hash, 或以
+// "+unknown" 與 "-dirty" 表示, 一併接受.
 var versionOutputRE = regexp.MustCompile(
 	`^gpumon (0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?(?:\+([0-9a-f]{7}|unknown)(-dirty)?)? \(protocol ([1-9][0-9]*)\)$`)
 
@@ -114,7 +115,12 @@ func (v ProgramVersion) Compare(o ProgramVersion) int {
 
 // RemoteInfo 為自遠端程式 --version 輸出取得的資訊.
 type RemoteInfo struct {
-	Version  ProgramVersion
+	Version ProgramVersion
+	// Full 為輸出中 "gpumon " 與 " (protocol" 之間的完整版本字串原文.
+	Full string
+	// Hash 為遠端的內容雜湊值; 遠端沒有內容雜湊值時為空字串, 即輸出沒有 "+" 一段,
+	// 為 "+unknown", 或帶有 "-dirty".
+	Hash     string
 	Protocol int
 }
 
@@ -134,7 +140,12 @@ func ParseVersionOutput(out string) (RemoteInfo, error) {
 	if err != nil {
 		return RemoteInfo{}, fmt.Errorf("invalid protocol version %q", m[9])
 	}
-	return RemoteInfo{Version: v, Protocol: proto}, nil
+	hash := ""
+	if m[7] != "unknown" && m[8] == "" {
+		hash = m[7]
+	}
+	full := strings.TrimSuffix(strings.TrimPrefix(line, "gpumon "), " (protocol "+m[9]+")")
+	return RemoteInfo{Version: v, Full: full, Hash: hash, Protocol: proto}, nil
 }
 
 // uploadAction 為決定是否上傳的結果.
@@ -147,20 +158,24 @@ const (
 )
 
 // decideUpload 依規格第 4 章的對照表, 由遠端的程式版號 (無法取得時 remote 為
-// nil) 與 GUI 的程式版號決定處理方式. 回傳 actionCheckRunning 時, 呼叫端須檢查
-// 遠端程式是否正在執行, 再以 decideAfterRunningCheck 決定.
-func decideUpload(remote *ProgramVersion, gui ProgramVersion) uploadAction {
+// nil), 遠端的內容雜湊值 (沒有時為空字串) 與 GUI 的程式版號, 內容雜湊值決定處理
+// 方式. 回傳 actionCheckRunning 時, 呼叫端須檢查遠端程式是否正在執行, 再以
+// decideAfterRunningCheck 決定.
+func decideUpload(remote *ProgramVersion, remoteHash string, gui ProgramVersion, guiHash string) uploadAction {
 	if remote == nil {
 		return actionUpload
 	}
-	if remote.Compare(gui) >= 0 {
+	switch cmp := remote.Compare(gui); {
+	case cmp > 0:
+		return actionUseExisting
+	case cmp == 0 && remoteHash != "" && remoteHash == guiHash:
 		return actionUseExisting
 	}
 	return actionCheckRunning
 }
 
-// decideAfterRunningCheck 處理遠端的程式版號低於 GUI 的情形: 正在執行時不上傳,
-// 否則上傳並覆寫.
+// decideAfterRunningCheck 處理遠端的程式版號低於 GUI, 或程式版號相等而內容雜湊值
+// 不同 (或遠端沒有內容雜湊值) 的情形: 正在執行時不上傳, 否則上傳並覆寫.
 func decideAfterRunningCheck(running bool) uploadAction {
 	if running {
 		return actionUseExisting

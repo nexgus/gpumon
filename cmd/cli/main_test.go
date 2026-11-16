@@ -170,7 +170,7 @@ func TestRunVersionAndUsage(t *testing.T) {
 	if code := run([]string{"--version"}, nil, &out, &errOut); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
-	re := regexp.MustCompile(`^gpumon (0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?\+([0-9a-f]{7}|unknown)(-dirty)? \(protocol ([1-9][0-9]*)\)$`)
+	re := regexp.MustCompile(`^gpumon (0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?\+[0-9a-f]{7} \(protocol ([1-9][0-9]*)\)$`)
 	if s := out.String(); !strings.HasSuffix(s, "\n") || !re.MatchString(strings.TrimSuffix(s, "\n")) || strings.Count(s, "\n") != 1 {
 		t.Errorf("--version output %q does not match the format", s)
 	}

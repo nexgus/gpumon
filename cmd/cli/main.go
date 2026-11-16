@@ -111,7 +111,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		printUsage(stdout)
 		return 0
 	case o.showVersion:
-		fmt.Fprintf(stdout, "gpumon %s (protocol %d)\n", version.Full(), protocol.Version)
+		fmt.Fprintf(stdout, "gpumon %s (protocol %d)\n", version.RemoteFull(), protocol.Version)
 		return 0
 	}
 

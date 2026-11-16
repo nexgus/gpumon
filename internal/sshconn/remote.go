@@ -66,12 +66,13 @@ type UploadRequest struct {
 	User string
 	// Path 為遠端程式的完整路徑 <家目錄>/.gpumon/gpumon.
 	Path string
-	// Update 為真表示更新, 即遠端的程式版號低於 GUI 且未在執行; 為假表示首次
-	// 上傳, 即無法取得遠端的程式版號.
+	// Update 為真表示更新, 即遠端的程式版號低於 GUI, 或兩者相等而內容雜湊值不同,
+	// 且遠端程式未在執行; 為假表示首次上傳, 即無法取得遠端的程式版號.
 	Update bool
-	// RemoteVersion 為遠端現有的程式版號, 首次上傳時為空字串.
+	// RemoteVersion 為遠端現有的完整版本字串 (--version 輸出中的原文), 首次上傳時
+	// 為空字串.
 	RemoteVersion string
-	// NewVersion 為即將上傳的程式版號, 即 GUI 的程式版號.
+	// NewVersion 為即將上傳的版本, 即 GUI 的程式版號後接 "+" 與 GUI 的內容雜湊值.
 	NewVersion string
 }
 
@@ -166,7 +167,12 @@ func (c *Client) Deploy(ctx context.Context, opts DeployOptions) (*Deployment, e
 		}
 	}
 
-	action := decideUpload(remoteVer, guiVer)
+	guiHash := version.ContentHash(opts.Binary)
+	remoteHash := ""
+	if dep.Remote != nil {
+		remoteHash = dep.Remote.Hash
+	}
+	action := decideUpload(remoteVer, remoteHash, guiVer, guiHash)
 	if action == actionCheckRunning {
 		running, err := c.programRunning(ctx, dep.Path, opts.CommandTimeout)
 		if err != nil {
@@ -178,10 +184,10 @@ func (c *Client) Deploy(ctx context.Context, opts DeployOptions) (*Deployment, e
 		if opts.ConfirmUpload != nil {
 			req := UploadRequest{
 				Host: c.Host, User: c.ssh.User(), Path: dep.Path,
-				Update: dep.Remote != nil, NewVersion: guiVer.String(),
+				Update: dep.Remote != nil, NewVersion: guiVer.String() + "+" + guiHash,
 			}
 			if dep.Remote != nil {
-				req.RemoteVersion = dep.Remote.Version.String()
+				req.RemoteVersion = dep.Remote.Full
 			}
 			if err := c.confirmUpload(ctx, opts.ConfirmUpload, req, opts.CommandTimeout); err != nil {
 				return nil, err
