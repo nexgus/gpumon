@@ -221,10 +221,17 @@ function build_app {
 	<string>${MACOS_MIN}</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>GPU Monitor 需要連線至與這台電腦位於同一個網路的主機，才能讀取該主機的 GPU 狀態。</string>
 </dict>
 </plist>
 PLIST
     plutil -lint -s "$app/Contents/Info.plist"
+    # 以 ad-hoc 方式重新簽章整個 bundle, 簽章識別碼設為 bundle identifier. 連結器
+    # 自動產生的簽章識別碼為 a.out 且不涵蓋 Info.plist, macOS 的區域網路隱私權
+    # 以簽章辨識程式, 兩個識別碼不一致時無法對應.
+    codesign --force --sign - --identifier "$BUNDLE_ID" "$app"
+    codesign --verify --strict "$app"
 }
 
 # build_pkg 將 .app 打包為安裝至 /Applications 的 .pkg, 不簽章. 元件設為不可
