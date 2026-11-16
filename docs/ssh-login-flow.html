@@ -1,0 +1,579 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SSH 登入流程</title>
+<style>
+:root {
+  --bg: #ffffff; --text: #1c2430; --muted: #5b6675; --line: #5b6675;
+  --process-fill: #eef3fb; --process-stroke: #4a6fa5;
+  --decision-fill: #fff6e0; --decision-stroke: #b07d12;
+  --terminal-fill: #e9f5ec; --terminal-stroke: #3d8a55;
+  --band0: #f7f9fc; --band-stroke: #dfe4ea; --link: #1f5fbf; --mark: #d2462c;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14181e; --text: #e6eaf0; --muted: #9aa5b3; --line: #9aa5b3;
+    --process-fill: #1e2a3d; --process-stroke: #6f97d1;
+    --decision-fill: #3a2f14; --decision-stroke: #d6a53a;
+    --terminal-fill: #1b3324; --terminal-stroke: #62b57d;
+    --band0: #181d25; --band-stroke: #2a313b; --link: #8ab4f8; --mark: #ff8a70;
+  }
+}
+html { scroll-behavior: smooth; }
+body { margin: 0; padding: 24px 16px 48px; background: var(--bg); color: var(--text);
+  font-family: -apple-system, "Segoe UI", "PingFang TC", "Microsoft JhengHei", sans-serif; line-height: 1.7; }
+main { max-width: 1190px; margin: 0 auto; }
+h1 { font-size: 1.5rem; margin: 0 0 8px; }
+p { margin: 0 0 16px; }
+h2 { font-size: 1.2rem; margin: 48px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--band-stroke); scroll-margin-top: 12px; }
+h2 .back { float: right; font-size: 0.85rem; font-weight: 400; }
+a { color: var(--link); }
+nav.figs { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0 0 8px; }
+svg { width: 100%; height: auto; display: block; }
+svg.defs { width: 0; height: 0; position: absolute; }
+.node { stroke-width: 1.6; }
+.process { fill: var(--process-fill); stroke: var(--process-stroke); }
+.subbar { stroke: var(--process-stroke); stroke-width: 1.6; }
+.decision { fill: var(--decision-fill); stroke: var(--decision-stroke); }
+.terminal { fill: var(--terminal-fill); stroke: var(--terminal-stroke); }
+.connector { fill: var(--bg); stroke: var(--line); }
+.ntext { font-size: 14px; fill: var(--text); }
+.ntext.link { fill: var(--link); text-decoration: underline; }
+.code { font-size: 11px; font-weight: 600; fill: var(--muted); }
+.edge { fill: none; stroke: var(--line); stroke-width: 1.5; }
+.arrowhead { fill: var(--line); }
+.elabel { font-size: 13px; font-weight: 600; fill: var(--text); }
+g.n { scroll-margin: 120px; }
+g.n:target > .node { stroke: var(--mark); stroke-width: 4; }
+g.n:target > .code { fill: var(--mark); }
+</style>
+</head>
+<body>
+<main>
+<h1 id="top">SSH 登入流程</h1>
+<svg class="defs" aria-hidden="true"><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="arrowhead"/></marker></defs></svg>
+<svg viewBox="0 0 1220 5866" role="img" aria-label="SSH 登入流程">
+<path class="edge" d="M590 92 L590 140" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 198 L590 246" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 334 L590 382" marker-end="url(#arrow)"/>
+<path class="edge" d="M460 430 L330 430" marker-end="url(#arrow)"/>
+<path class="edge" d="M210 459 L210 858 L590 858" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 478 L590 526" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 584 L590 632" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 728 L590 776" marker-end="url(#arrow)"/>
+<path class="edge" d="M720 680 L850 680" marker-end="url(#arrow)"/>
+<path class="edge" d="M970 709 L970 752 L590 752" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 834 L590 882" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 940 L590 988" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 1046 L590 1094" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 1152 L590 1200" marker-end="url(#arrow)"/>
+<path class="edge" d="M460 1248 L330 1248" marker-end="url(#arrow)"/>
+<path class="edge" d="M90 1248 L20 1248 L20 5813 L470 5813" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 1296 L590 1344" marker-end="url(#arrow)"/>
+<path class="edge" d="M720 1392 L970 1392 L970 1964 L590 1964" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 1440 L590 1488" marker-end="url(#arrow)"/>
+<path class="edge" d="M460 1536 L330 1536" marker-end="url(#arrow)"/>
+<path class="edge" d="M210 1565 L210 1714 L590 1714" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 1584 L590 1632" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 1690 L590 1738" marker-end="url(#arrow)"/>
+<path class="edge" d="M460 1786 L330 1786" marker-end="url(#arrow)"/>
+<path class="edge" d="M90 1786 L20 1786 L20 5813 L470 5813" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 1834 L590 1882" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 1940 L590 1988" marker-end="url(#arrow)"/>
+<path class="edge" d="M720 2036 L970 2036 L970 2132" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 2084 L590 3132" marker-end="url(#arrow)"/>
+<path class="edge" d="M1100 2180 L1145 2180 L1145 3055 L1090 3055" marker-end="url(#arrow)"/>
+<path class="edge" d="M970 2228 L970 2276" marker-end="url(#arrow)"/>
+<path class="edge" d="M970 2334 L970 2382" marker-end="url(#arrow)"/>
+<path class="edge" d="M1100 2430 L1145 2430 L1145 3055 L1090 3055" marker-end="url(#arrow)"/>
+<path class="edge" d="M970 2478 L970 2526" marker-end="url(#arrow)"/>
+<path class="edge" d="M1100 2574 L1145 2574 L1145 3055 L1090 3055" marker-end="url(#arrow)"/>
+<path class="edge" d="M970 2622 L970 2670" marker-end="url(#arrow)"/>
+<path class="edge" d="M970 2728 L970 2776" marker-end="url(#arrow)"/>
+<path class="edge" d="M840 2824 L780 2824 L780 2180 L840 2180" marker-end="url(#arrow)"/>
+<path class="edge" d="M970 2872 L970 2920" marker-end="url(#arrow)"/>
+<path class="edge" d="M850 2949 L760 2949 L760 3108 L590 3108" marker-end="url(#arrow)"/>
+<path class="edge" d="M970 3084 L970 3108 L590 3108" marker-end="url(#arrow)"/>
+<path class="edge" d="M460 3180 L330 3180" marker-end="url(#arrow)"/>
+<path class="edge" d="M90 3180 L20 3180 L20 5813 L470 5813" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 3228 L590 3276" marker-end="url(#arrow)"/>
+<path class="edge" d="M720 3324 L1170 3324 L1170 5813 L710 5813" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 3372 L590 3420" marker-end="url(#arrow)"/>
+<path class="edge" d="M720 3468 L850 3468" marker-end="url(#arrow)"/>
+<path class="edge" d="M1090 3468 L1170 3468 L1170 5813 L710 5813" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 3516 L590 3564" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 3622 L590 3670" marker-end="url(#arrow)"/>
+<path class="edge" d="M460 3718 L330 3718" marker-end="url(#arrow)"/>
+<path class="edge" d="M90 3718 L20 3718 L20 5813 L470 5813" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 3766 L590 3814" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 3872 L590 3920" marker-end="url(#arrow)"/>
+<path class="edge" d="M460 3968 L330 3968" marker-end="url(#arrow)"/>
+<path class="edge" d="M90 3968 L20 3968 L20 5813 L470 5813" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 4016 L590 4064" marker-end="url(#arrow)"/>
+<path class="edge" d="M720 4112 L840 4112" marker-end="url(#arrow)"/>
+<path class="edge" d="M970 4064 L970 3593 L710 3593" marker-end="url(#arrow)"/>
+<path class="edge" d="M970 4160 L970 4227" marker-end="url(#arrow)"/>
+<path class="edge" d="M1090 4256 L1170 4256 L1170 5813 L710 5813" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 4160 L590 4208" marker-end="url(#arrow)"/>
+<path class="edge" d="M460 4256 L20 4256 L20 5813 L470 5813" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 4304 L590 4352" marker-end="url(#arrow)"/>
+<path class="edge" d="M460 4400 L20 4400 L20 5813 L470 5813" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 4448 L590 4496" marker-end="url(#arrow)"/>
+<path class="edge" d="M460 4544 L340 4544" marker-end="url(#arrow)"/>
+<path class="edge" d="M80 4544 L20 4544 L20 5813 L470 5813" marker-end="url(#arrow)"/>
+<path class="edge" d="M210 4592 L210 4616 L590 4616" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 4592 L590 4640" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 4698 L590 4746" marker-end="url(#arrow)"/>
+<path class="edge" d="M460 4794 L330 4794" marker-end="url(#arrow)"/>
+<path class="edge" d="M90 4794 L20 4794 L20 5813 L470 5813" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 4842 L590 4890" marker-end="url(#arrow)"/>
+<path class="edge" d="M720 4938 L840 4938" marker-end="url(#arrow)"/>
+<path class="edge" d="M1100 4938 L1170 4938 L1170 5813 L710 5813" marker-end="url(#arrow)"/>
+<path class="edge" d="M970 4986 L970 5034" marker-end="url(#arrow)"/>
+<path class="edge" d="M1090 5063 L1170 5063 L1170 5813 L710 5813" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 4986 L590 5140" marker-end="url(#arrow)"/>
+<path class="edge" d="M720 5188 L850 5188" marker-end="url(#arrow)"/>
+<path class="edge" d="M970 5217 L970 5284" marker-end="url(#arrow)"/>
+<path class="edge" d="M840 5332 L590 5332" marker-end="url(#arrow)"/>
+<path class="edge" d="M970 5380 L970 5428" marker-end="url(#arrow)"/>
+<path class="edge" d="M1090 5457 L1170 5457 L1170 5813 L710 5813" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 5236 L590 5428" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 5486 L590 5534" marker-end="url(#arrow)"/>
+<path class="edge" d="M720 5582 L850 5582" marker-end="url(#arrow)"/>
+<path class="edge" d="M970 5611 L970 5654 L590 5654" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 5630 L590 5678" marker-end="url(#arrow)"/>
+<path class="edge" d="M590 5736 L590 5784" marker-end="url(#arrow)"/>
+<text class="elabel" x="450" y="421" text-anchor="end">否</text>
+<text class="elabel" x="600" y="498" text-anchor="start">是</text>
+<text class="elabel" x="600" y="748" text-anchor="start">否</text>
+<text class="elabel" x="730" y="671" text-anchor="start">是</text>
+<text class="elabel" x="450" y="1239" text-anchor="end">否</text>
+<text class="elabel" x="600" y="1316" text-anchor="start">是</text>
+<text class="elabel" x="730" y="1383" text-anchor="start">是</text>
+<text class="elabel" x="600" y="1460" text-anchor="start">否</text>
+<text class="elabel" x="450" y="1527" text-anchor="end">是</text>
+<text class="elabel" x="600" y="1604" text-anchor="start">否</text>
+<text class="elabel" x="450" y="1777" text-anchor="end">否</text>
+<text class="elabel" x="600" y="1854" text-anchor="start">是</text>
+<text class="elabel" x="730" y="2027" text-anchor="start">是</text>
+<text class="elabel" x="600" y="2104" text-anchor="start">否</text>
+<text class="elabel" x="1110" y="2171" text-anchor="start">是</text>
+<text class="elabel" x="980" y="2248" text-anchor="start">否</text>
+<text class="elabel" x="1110" y="2421" text-anchor="start">是</text>
+<text class="elabel" x="980" y="2498" text-anchor="start">否</text>
+<text class="elabel" x="1110" y="2565" text-anchor="start">是</text>
+<text class="elabel" x="980" y="2642" text-anchor="start">否</text>
+<text class="elabel" x="830" y="2815" text-anchor="end">否</text>
+<text class="elabel" x="980" y="2892" text-anchor="start">是</text>
+<text class="elabel" x="450" y="3171" text-anchor="end">是</text>
+<text class="elabel" x="600" y="3248" text-anchor="start">否</text>
+<text class="elabel" x="730" y="3315" text-anchor="start">是</text>
+<text class="elabel" x="600" y="3392" text-anchor="start">否</text>
+<text class="elabel" x="730" y="3459" text-anchor="start">否</text>
+<text class="elabel" x="600" y="3536" text-anchor="start">是</text>
+<text class="elabel" x="450" y="3709" text-anchor="end">是</text>
+<text class="elabel" x="600" y="3786" text-anchor="start">否</text>
+<text class="elabel" x="450" y="3959" text-anchor="end">是</text>
+<text class="elabel" x="600" y="4036" text-anchor="start">否</text>
+<text class="elabel" x="730" y="4103" text-anchor="start">否</text>
+<text class="elabel" x="980" y="4055" text-anchor="start">是</text>
+<text class="elabel" x="980" y="4180" text-anchor="start">否</text>
+<text class="elabel" x="600" y="4180" text-anchor="start">是</text>
+<text class="elabel" x="450" y="4247" text-anchor="end">是</text>
+<text class="elabel" x="600" y="4324" text-anchor="start">否</text>
+<text class="elabel" x="450" y="4391" text-anchor="end">是</text>
+<text class="elabel" x="600" y="4468" text-anchor="start">否</text>
+<text class="elabel" x="450" y="4535" text-anchor="end">否</text>
+<text class="elabel" x="70" y="4535" text-anchor="end">是</text>
+<text class="elabel" x="220" y="4612" text-anchor="start">否</text>
+<text class="elabel" x="600" y="4612" text-anchor="start">是</text>
+<text class="elabel" x="450" y="4785" text-anchor="end">是</text>
+<text class="elabel" x="600" y="4862" text-anchor="start">否</text>
+<text class="elabel" x="730" y="4929" text-anchor="start">否</text>
+<text class="elabel" x="1110" y="4929" text-anchor="start">否</text>
+<text class="elabel" x="980" y="5006" text-anchor="start">是</text>
+<text class="elabel" x="600" y="5006" text-anchor="start">是</text>
+<text class="elabel" x="730" y="5179" text-anchor="start">否</text>
+<text class="elabel" x="830" y="5323" text-anchor="end">是</text>
+<text class="elabel" x="980" y="5400" text-anchor="start">否</text>
+<text class="elabel" x="600" y="5256" text-anchor="start">是</text>
+<text class="elabel" x="730" y="5573" text-anchor="start">否</text>
+<text class="elabel" x="600" y="5650" text-anchor="start">是</text>
+<g id="1" class="n">
+<rect class="node terminal" x="470.0" y="34.0" width="240" height="58" rx="29.0"/>
+<text class="code" x="474.0" y="28.0" text-anchor="start">1</text>
+<text class="ntext" x="590" y="63.0" text-anchor="middle" dominant-baseline="central">開始</text>
+</g>
+<g id="2" class="n">
+<rect class="node process" x="470.0" y="140.0" width="240" height="58" rx="8"/>
+<text class="code" x="474.0" y="134.0" text-anchor="start">2</text>
+<text class="ntext" x="590" y="149.0" text-anchor="middle" dominant-baseline="central">依使用者指定的值, SSH 設定檔</text>
+<text class="ntext" x="590" y="169.0" text-anchor="middle" dominant-baseline="central">與預設值, 決定遠端主機的位址,</text>
+<text class="ntext" x="590" y="189.0" text-anchor="middle" dominant-baseline="central">連接埠與使用者名稱</text>
+</g>
+<g id="3" class="n">
+<rect class="node process" x="470.0" y="246.0" width="240" height="88" rx="8"/>
+<text class="code" x="474.0" y="240.0" text-anchor="start">3</text>
+<text class="ntext" x="590" y="260.0" text-anchor="middle" dominant-baseline="central">依序列出使用者指定的金鑰檔</text>
+<text class="ntext" x="590" y="280.0" text-anchor="middle" dominant-baseline="central">與 SSH 設定檔指定的金鑰檔,</text>
+<text class="ntext" x="590" y="300.0" text-anchor="middle" dominant-baseline="central">兩者皆無時列出預設名稱的金鑰檔,</text>
+<text class="ntext" x="590" y="320.0" text-anchor="middle" dominant-baseline="central">從中找出存在且能取得公鑰者</text>
+</g>
+<g id="4" class="n">
+<polygon class="node decision" points="590,382.0 720.0,430.0 590,478.0 460.0,430.0"/>
+<text class="code" x="517" y="398.0" text-anchor="end">4</text>
+<text class="ntext" x="590" y="430.0" text-anchor="middle" dominant-baseline="central">有 ssh-agent?</text>
+</g>
+<g id="5" class="n">
+<rect class="node process" x="90.0" y="401.0" width="240" height="58" rx="8"/>
+<text class="code" x="94.0" y="395.0" text-anchor="start">5</text>
+<text class="ntext" x="210" y="420.0" text-anchor="middle" dominant-baseline="central">交給函式庫的金鑰</text>
+<text class="ntext" x="210" y="440.0" text-anchor="middle" dominant-baseline="central">只有找到的金鑰檔</text>
+</g>
+<g id="6" class="n">
+<rect class="node process" x="470.0" y="526.0" width="240" height="58" rx="8"/>
+<text class="code" x="474.0" y="520.0" text-anchor="start">6</text>
+<text class="ntext" x="590" y="545.0" text-anchor="middle" dominant-baseline="central">向 ssh-agent 取得</text>
+<text class="ntext" x="590" y="565.0" text-anchor="middle" dominant-baseline="central">它保管的金鑰</text>
+</g>
+<g id="7" class="n">
+<polygon class="node decision" points="590,632.0 720.0,680.0 590,728.0 460.0,680.0"/>
+<text class="code" x="517" y="648.0" text-anchor="end">7</text>
+<text class="ntext" x="590" y="660.0" text-anchor="middle" dominant-baseline="central">SSH 設定檔的</text>
+<text class="ntext" x="590" y="680.0" text-anchor="middle" dominant-baseline="central">IdentitiesOnly</text>
+<text class="ntext" x="590" y="700.0" text-anchor="middle" dominant-baseline="central">為 yes?</text>
+</g>
+<g id="8" class="n">
+<rect class="node process" x="850.0" y="651.0" width="240" height="58" rx="8"/>
+<text class="code" x="854.0" y="645.0" text-anchor="start">8</text>
+<text class="ntext" x="970" y="670.0" text-anchor="middle" dominant-baseline="central">ssh-agent 的金鑰中, 只保留</text>
+<text class="ntext" x="970" y="690.0" text-anchor="middle" dominant-baseline="central">本機金鑰檔裡也有的金鑰</text>
+</g>
+<g id="9" class="n">
+<rect class="node process" x="470.0" y="776.0" width="240" height="58" rx="8"/>
+<text class="code" x="474.0" y="770.0" text-anchor="start">9</text>
+<text class="ntext" x="590" y="785.0" text-anchor="middle" dominant-baseline="central">ssh-agent 的金鑰排在金鑰檔</text>
+<text class="ntext" x="590" y="805.0" text-anchor="middle" dominant-baseline="central">之前, 並剔除已在 ssh-agent</text>
+<text class="ntext" x="590" y="825.0" text-anchor="middle" dominant-baseline="central">中的金鑰檔</text>
+</g>
+<g id="10" class="n">
+<rect class="node process" x="470.0" y="882.0" width="240" height="58" rx="8"/>
+<text class="code" x="474.0" y="876.0" text-anchor="start">10</text>
+<text class="ntext" x="590" y="891.0" text-anchor="middle" dominant-baseline="central">程式自己的 known_hosts</text>
+<text class="ntext" x="590" y="911.0" text-anchor="middle" dominant-baseline="central">不存在時, 在程式的目錄中</text>
+<text class="ntext" x="590" y="931.0" text-anchor="middle" dominant-baseline="central">建立空檔案</text>
+</g>
+<g id="11" class="n">
+<rect class="node process" x="470.0" y="988.0" width="240" height="58" rx="8"/>
+<text class="code" x="474.0" y="982.0" text-anchor="start">11</text>
+<text class="ntext" x="590" y="997.0" text-anchor="middle" dominant-baseline="central">依兩份 known_hosts 中這台</text>
+<text class="ntext" x="590" y="1017.0" text-anchor="middle" dominant-baseline="central">遠端主機已記錄的主機金鑰</text>
+<text class="ntext" x="590" y="1037.0" text-anchor="middle" dominant-baseline="central">種類, 排定優先接受的種類</text>
+</g>
+<g id="12" class="n">
+<rect class="node process" x="470.0" y="1094.0" width="240" height="58" rx="8"/>
+<text class="code" x="474.0" y="1088.0" text-anchor="start">12</text>
+<text class="ntext" x="590" y="1103.0" text-anchor="middle" dominant-baseline="central">把上述設定, 要嘗試的金鑰, 以及</text>
+<text class="ntext" x="590" y="1123.0" text-anchor="middle" dominant-baseline="central">處理主機金鑰與詢問密碼的方式</text>
+<text class="ntext" x="590" y="1143.0" text-anchor="middle" dominant-baseline="central">交給函式庫, 開始連線與登入</text>
+</g>
+<g id="13" class="n">
+<polygon class="node decision" points="590,1200.0 720.0,1248.0 590,1296.0 460.0,1248.0"/>
+<text class="code" x="517" y="1216.0" text-anchor="end">13</text>
+<text class="ntext" x="590" y="1238.0" text-anchor="middle" dominant-baseline="central">函式庫回報</text>
+<text class="ntext" x="590" y="1258.0" text-anchor="middle" dominant-baseline="central">連線已建立?</text>
+</g>
+<g id="14" class="n">
+<rect class="node process" x="90.0" y="1219.0" width="240" height="58" rx="8"/>
+<text class="code" x="94.0" y="1213.0" text-anchor="start">14</text>
+<text class="ntext" x="210" y="1248.0" text-anchor="middle" dominant-baseline="central">回報使用者無法連線</text>
+</g>
+<g id="15" class="n">
+<polygon class="node decision" points="590,1344.0 720.0,1392.0 590,1440.0 460.0,1392.0"/>
+<text class="code" x="517" y="1360.0" text-anchor="end">15</text>
+<text class="ntext" x="590" y="1372.0" text-anchor="middle" dominant-baseline="central">函式庫回報</text>
+<text class="ntext" x="590" y="1392.0" text-anchor="middle" dominant-baseline="central">known_hosts 中有</text>
+<text class="ntext" x="590" y="1412.0" text-anchor="middle" dominant-baseline="central">相同的記錄?</text>
+</g>
+<g id="16" class="n">
+<polygon class="node decision" points="590,1488.0 720.0,1536.0 590,1584.0 460.0,1536.0"/>
+<text class="code" x="517" y="1504.0" text-anchor="end">16</text>
+<text class="ntext" x="590" y="1516.0" text-anchor="middle" dominant-baseline="central">函式庫回報</text>
+<text class="ntext" x="590" y="1536.0" text-anchor="middle" dominant-baseline="central">known_hosts 中有這台遠端主機</text>
+<text class="ntext" x="590" y="1556.0" text-anchor="middle" dominant-baseline="central">的其他記錄?</text>
+</g>
+<g id="17" class="n">
+<rect class="node process" x="90.0" y="1507.0" width="240" height="58" rx="8"/>
+<text class="code" x="94.0" y="1501.0" text-anchor="start">17</text>
+<text class="ntext" x="210" y="1516.0" text-anchor="middle" dominant-baseline="central">顯示遠端主機的新舊指紋並警告</text>
+<text class="ntext" x="210" y="1536.0" text-anchor="middle" dominant-baseline="central">可能遭到冒充, 詢問使用者</text>
+<text class="ntext" x="210" y="1556.0" text-anchor="middle" dominant-baseline="central">是否更新記錄並繼續連線</text>
+</g>
+<g id="18" class="n">
+<rect class="node process" x="470.0" y="1632.0" width="240" height="58" rx="8"/>
+<text class="code" x="474.0" y="1626.0" text-anchor="start">18</text>
+<text class="ntext" x="590" y="1651.0" text-anchor="middle" dominant-baseline="central">顯示遠端主機的指紋,</text>
+<text class="ntext" x="590" y="1671.0" text-anchor="middle" dominant-baseline="central">詢問使用者是否繼續連線</text>
+</g>
+<g id="19" class="n">
+<polygon class="node decision" points="590,1738.0 720.0,1786.0 590,1834.0 460.0,1786.0"/>
+<text class="code" x="517" y="1754.0" text-anchor="end">19</text>
+<text class="ntext" x="590" y="1776.0" text-anchor="middle" dominant-baseline="central">使用者同意</text>
+<text class="ntext" x="590" y="1796.0" text-anchor="middle" dominant-baseline="central">繼續連線?</text>
+</g>
+<g id="20" class="n">
+<rect class="node process" x="90.0" y="1757.0" width="240" height="58" rx="8"/>
+<text class="code" x="94.0" y="1751.0" text-anchor="start">20</text>
+<text class="ntext" x="210" y="1776.0" text-anchor="middle" dominant-baseline="central">中止連線,</text>
+<text class="ntext" x="210" y="1796.0" text-anchor="middle" dominant-baseline="central">不回報使用者任何錯誤</text>
+</g>
+<g id="21" class="n">
+<rect class="node process" x="470.0" y="1882.0" width="240" height="58" rx="8"/>
+<text class="code" x="474.0" y="1876.0" text-anchor="start">21</text>
+<text class="ntext" x="590" y="1891.0" text-anchor="middle" dominant-baseline="central">把主機金鑰寫入程式自己的</text>
+<text class="ntext" x="590" y="1911.0" text-anchor="middle" dominant-baseline="central">known_hosts, 並刪除其中這台</text>
+<text class="ntext" x="590" y="1931.0" text-anchor="middle" dominant-baseline="central">遠端主機的舊記錄</text>
+</g>
+<g id="22" class="n">
+<polygon class="node decision" points="590,1988.0 720.0,2036.0 590,2084.0 460.0,2036.0"/>
+<text class="code" x="517" y="2004.0" text-anchor="end">22</text>
+<text class="ntext" x="590" y="2026.0" text-anchor="middle" dominant-baseline="central">函式庫要求以需要</text>
+<text class="ntext" x="590" y="2046.0" text-anchor="middle" dominant-baseline="central">金鑰密碼的金鑰簽章?</text>
+</g>
+<g id="23" class="n">
+<polygon class="node decision" points="970,2132.0 1100.0,2180.0 970,2228.0 840.0,2180.0"/>
+<text class="code" x="897" y="2148.0" text-anchor="end">23</text>
+<text class="ntext" x="970" y="2170.0" text-anchor="middle" dominant-baseline="central">這把金鑰的金鑰密碼</text>
+<text class="ntext" x="970" y="2190.0" text-anchor="middle" dominant-baseline="central">已輸入 3 次?</text>
+</g>
+<g id="24" class="n">
+<rect class="node process" x="850.0" y="2276.0" width="240" height="58" rx="8"/>
+<text class="code" x="854.0" y="2270.0" text-anchor="start">24</text>
+<text class="ntext" x="970" y="2305.0" text-anchor="middle" dominant-baseline="central">要求使用者輸入金鑰密碼</text>
+</g>
+<g id="25" class="n">
+<polygon class="node decision" points="970,2382.0 1100.0,2430.0 970,2478.0 840.0,2430.0"/>
+<text class="code" x="897" y="2398.0" text-anchor="end">25</text>
+<text class="ntext" x="970" y="2430.0" text-anchor="middle" dominant-baseline="central">使用者選擇取消?</text>
+</g>
+<g id="26" class="n">
+<polygon class="node decision" points="970,2526.0 1100.0,2574.0 970,2622.0 840.0,2574.0"/>
+<text class="code" x="897" y="2542.0" text-anchor="end">26</text>
+<text class="ntext" x="970" y="2574.0" text-anchor="middle" dominant-baseline="central">金鑰密碼留空?</text>
+</g>
+<g id="27" class="n">
+<rect class="node process" x="850.0" y="2670.0" width="240" height="58" rx="8"/>
+<text class="code" x="854.0" y="2664.0" text-anchor="start">27</text>
+<text class="ntext" x="970" y="2699.0" text-anchor="middle" dominant-baseline="central">把金鑰密碼交給函式庫</text>
+</g>
+<g id="28" class="n">
+<polygon class="node decision" points="970,2776.0 1100.0,2824.0 970,2872.0 840.0,2824.0"/>
+<text class="code" x="897" y="2792.0" text-anchor="end">28</text>
+<text class="ntext" x="970" y="2814.0" text-anchor="middle" dominant-baseline="central">函式庫回報</text>
+<text class="ntext" x="970" y="2834.0" text-anchor="middle" dominant-baseline="central">金鑰密碼正確?</text>
+</g>
+<g id="29" class="n">
+<rect class="node process" x="850.0" y="2920.0" width="240" height="58" rx="8"/>
+<text class="code" x="854.0" y="2914.0" text-anchor="start">29</text>
+<text class="ntext" x="970" y="2939.0" text-anchor="middle" dominant-baseline="central">把解開的金鑰</text>
+<text class="ntext" x="970" y="2959.0" text-anchor="middle" dominant-baseline="central">交回函式庫簽章</text>
+</g>
+<g id="30" class="n">
+<rect class="node process" x="850.0" y="3026.0" width="240" height="58" rx="8"/>
+<text class="code" x="854.0" y="3020.0" text-anchor="start">30</text>
+<text class="ntext" x="970" y="3045.0" text-anchor="middle" dominant-baseline="central">回覆函式庫,</text>
+<text class="ntext" x="970" y="3065.0" text-anchor="middle" dominant-baseline="central">這把金鑰無法簽章</text>
+</g>
+<g id="31" class="n">
+<polygon class="node decision" points="590,3132.0 720.0,3180.0 590,3228.0 460.0,3180.0"/>
+<text class="code" x="517" y="3148.0" text-anchor="end">31</text>
+<text class="ntext" x="590" y="3170.0" text-anchor="middle" dominant-baseline="central">函式庫回報</text>
+<text class="ntext" x="590" y="3190.0" text-anchor="middle" dominant-baseline="central">連線已中斷?</text>
+</g>
+<g id="32" class="n">
+<rect class="node process" x="90.0" y="3151.0" width="240" height="58" rx="8"/>
+<text class="code" x="94.0" y="3145.0" text-anchor="start">32</text>
+<text class="ntext" x="210" y="3170.0" text-anchor="middle" dominant-baseline="central">回報使用者遠端主機</text>
+<text class="ntext" x="210" y="3190.0" text-anchor="middle" dominant-baseline="central">已中斷連線</text>
+</g>
+<g id="33" class="n">
+<polygon class="node decision" points="590,3276.0 720.0,3324.0 590,3372.0 460.0,3324.0"/>
+<text class="code" x="517" y="3292.0" text-anchor="end">33</text>
+<text class="ntext" x="590" y="3314.0" text-anchor="middle" dominant-baseline="central">函式庫回報</text>
+<text class="ntext" x="590" y="3334.0" text-anchor="middle" dominant-baseline="central">登入成功?</text>
+</g>
+<g id="34" class="n">
+<polygon class="node decision" points="590,3420.0 720.0,3468.0 590,3516.0 460.0,3468.0"/>
+<text class="code" x="517" y="3436.0" text-anchor="end">34</text>
+<text class="ntext" x="590" y="3468.0" text-anchor="middle" dominant-baseline="central">函式庫要求密碼?</text>
+</g>
+<g id="35" class="n">
+<rect class="node process" x="850.0" y="3439.0" width="240" height="58" rx="8"/>
+<text class="code" x="854.0" y="3433.0" text-anchor="start">35</text>
+<text class="ntext" x="970" y="3468.0" text-anchor="middle" dominant-baseline="central">回報使用者登入失敗</text>
+</g>
+<g id="36" class="n">
+<rect class="node process" x="470.0" y="3564.0" width="240" height="58" rx="8"/>
+<text class="code" x="474.0" y="3558.0" text-anchor="start">36</text>
+<text class="ntext" x="590" y="3593.0" text-anchor="middle" dominant-baseline="central">要求使用者輸入密碼</text>
+</g>
+<g id="37" class="n">
+<polygon class="node decision" points="590,3670.0 720.0,3718.0 590,3766.0 460.0,3718.0"/>
+<text class="code" x="517" y="3686.0" text-anchor="end">37</text>
+<text class="ntext" x="590" y="3718.0" text-anchor="middle" dominant-baseline="central">使用者選擇取消?</text>
+</g>
+<g id="38" class="n">
+<rect class="node process" x="90.0" y="3689.0" width="240" height="58" rx="8"/>
+<text class="code" x="94.0" y="3683.0" text-anchor="start">38</text>
+<text class="ntext" x="210" y="3708.0" text-anchor="middle" dominant-baseline="central">中止連線,</text>
+<text class="ntext" x="210" y="3728.0" text-anchor="middle" dominant-baseline="central">不回報使用者任何錯誤</text>
+</g>
+<g id="39" class="n">
+<rect class="node process" x="470.0" y="3814.0" width="240" height="58" rx="8"/>
+<text class="code" x="474.0" y="3808.0" text-anchor="start">39</text>
+<text class="ntext" x="590" y="3843.0" text-anchor="middle" dominant-baseline="central">把密碼交給函式庫送出</text>
+</g>
+<g id="40" class="n">
+<polygon class="node decision" points="590,3920.0 720.0,3968.0 590,4016.0 460.0,3968.0"/>
+<text class="code" x="517" y="3936.0" text-anchor="end">40</text>
+<text class="ntext" x="590" y="3958.0" text-anchor="middle" dominant-baseline="central">函式庫回報</text>
+<text class="ntext" x="590" y="3978.0" text-anchor="middle" dominant-baseline="central">連線已中斷?</text>
+</g>
+<g id="41" class="n">
+<rect class="node process" x="90.0" y="3939.0" width="240" height="58" rx="8"/>
+<text class="code" x="94.0" y="3933.0" text-anchor="start">41</text>
+<text class="ntext" x="210" y="3958.0" text-anchor="middle" dominant-baseline="central">回報使用者遠端主機</text>
+<text class="ntext" x="210" y="3978.0" text-anchor="middle" dominant-baseline="central">已中斷連線</text>
+</g>
+<g id="42" class="n">
+<polygon class="node decision" points="590,4064.0 720.0,4112.0 590,4160.0 460.0,4112.0"/>
+<text class="code" x="517" y="4080.0" text-anchor="end">42</text>
+<text class="ntext" x="590" y="4102.0" text-anchor="middle" dominant-baseline="central">函式庫回報</text>
+<text class="ntext" x="590" y="4122.0" text-anchor="middle" dominant-baseline="central">登入成功?</text>
+</g>
+<g id="43" class="n">
+<polygon class="node decision" points="970,4064.0 1100.0,4112.0 970,4160.0 840.0,4112.0"/>
+<text class="code" x="897" y="4080.0" text-anchor="end">43</text>
+<text class="ntext" x="970" y="4102.0" text-anchor="middle" dominant-baseline="central">函式庫再次</text>
+<text class="ntext" x="970" y="4122.0" text-anchor="middle" dominant-baseline="central">要求密碼?</text>
+</g>
+<g id="44" class="n">
+<rect class="node process" x="850.0" y="4227.0" width="240" height="58" rx="8"/>
+<text class="code" x="854.0" y="4221.0" text-anchor="start">44</text>
+<text class="ntext" x="970" y="4256.0" text-anchor="middle" dominant-baseline="central">回報使用者登入失敗</text>
+</g>
+<g id="45" class="n">
+<polygon class="node decision" points="590,4208.0 720.0,4256.0 590,4304.0 460.0,4256.0"/>
+<text class="code" x="517" y="4224.0" text-anchor="end">45</text>
+<text class="ntext" x="590" y="4246.0" text-anchor="middle" dominant-baseline="central">遠端主機已設為</text>
+<text class="ntext" x="590" y="4266.0" text-anchor="middle" dominant-baseline="central">&quot;不再詢問&quot;?</text>
+</g>
+<g id="46" class="n">
+<polygon class="node decision" points="590,4352.0 720.0,4400.0 590,4448.0 460.0,4400.0"/>
+<text class="code" x="517" y="4368.0" text-anchor="end">46</text>
+<text class="ntext" x="590" y="4390.0" text-anchor="middle" dominant-baseline="central">函式庫這次曾要求以需要</text>
+<text class="ntext" x="590" y="4410.0" text-anchor="middle" dominant-baseline="central">金鑰密碼的金鑰簽章?</text>
+</g>
+<g id="47" class="n">
+<polygon class="node decision" points="590,4496.0 720.0,4544.0 590,4592.0 460.0,4544.0"/>
+<text class="code" x="517" y="4512.0" text-anchor="end">47</text>
+<text class="ntext" x="590" y="4544.0" text-anchor="middle" dominant-baseline="central">本機有金鑰檔?</text>
+</g>
+<g id="48" class="n">
+<polygon class="node decision" points="210,4496.0 340.0,4544.0 210,4592.0 80.0,4544.0"/>
+<text class="code" x="137" y="4512.0" text-anchor="end">48</text>
+<text class="ntext" x="210" y="4534.0" text-anchor="middle" dominant-baseline="central">本機的 ssh-agent</text>
+<text class="ntext" x="210" y="4554.0" text-anchor="middle" dominant-baseline="central">有金鑰?</text>
+</g>
+<g id="49" class="n">
+<rect class="node process" x="470.0" y="4640.0" width="240" height="58" rx="8"/>
+<text class="code" x="474.0" y="4634.0" text-anchor="start">49</text>
+<text class="ntext" x="590" y="4659.0" text-anchor="middle" dominant-baseline="central">詢問使用者是否設定</text>
+<text class="ntext" x="590" y="4679.0" text-anchor="middle" dominant-baseline="central">免密碼登入</text>
+</g>
+<g id="50" class="n">
+<polygon class="node decision" points="590,4746.0 720.0,4794.0 590,4842.0 460.0,4794.0"/>
+<text class="code" x="517" y="4762.0" text-anchor="end">50</text>
+<text class="ntext" x="590" y="4784.0" text-anchor="middle" dominant-baseline="central">函式庫回報</text>
+<text class="ntext" x="590" y="4804.0" text-anchor="middle" dominant-baseline="central">連線已中斷?</text>
+</g>
+<g id="51" class="n">
+<rect class="node process" x="90.0" y="4765.0" width="240" height="58" rx="8"/>
+<text class="code" x="94.0" y="4759.0" text-anchor="start">51</text>
+<text class="ntext" x="210" y="4784.0" text-anchor="middle" dominant-baseline="central">結束詢問,</text>
+<text class="ntext" x="210" y="4804.0" text-anchor="middle" dominant-baseline="central">不回報使用者任何錯誤</text>
+</g>
+<g id="52" class="n">
+<polygon class="node decision" points="590,4890.0 720.0,4938.0 590,4986.0 460.0,4938.0"/>
+<text class="code" x="517" y="4906.0" text-anchor="end">52</text>
+<text class="ntext" x="590" y="4928.0" text-anchor="middle" dominant-baseline="central">使用者選擇</text>
+<text class="ntext" x="590" y="4948.0" text-anchor="middle" dominant-baseline="central">設定免密碼登入?</text>
+</g>
+<g id="53" class="n">
+<polygon class="node decision" points="970,4890.0 1100.0,4938.0 970,4986.0 840.0,4938.0"/>
+<text class="code" x="897" y="4906.0" text-anchor="end">53</text>
+<text class="ntext" x="970" y="4928.0" text-anchor="middle" dominant-baseline="central">使用者選擇</text>
+<text class="ntext" x="970" y="4948.0" text-anchor="middle" dominant-baseline="central">不再詢問?</text>
+</g>
+<g id="54" class="n">
+<rect class="node process" x="850.0" y="5034.0" width="240" height="58" rx="8"/>
+<text class="code" x="854.0" y="5028.0" text-anchor="start">54</text>
+<text class="ntext" x="970" y="5053.0" text-anchor="middle" dominant-baseline="central">記下遠端主機</text>
+<text class="ntext" x="970" y="5073.0" text-anchor="middle" dominant-baseline="central">不再詢問</text>
+</g>
+<g id="55" class="n">
+<polygon class="node decision" points="590,5140.0 720.0,5188.0 590,5236.0 460.0,5188.0"/>
+<text class="code" x="517" y="5156.0" text-anchor="end">55</text>
+<text class="ntext" x="590" y="5188.0" text-anchor="middle" dominant-baseline="central">本機有金鑰檔?</text>
+</g>
+<g id="56" class="n">
+<rect class="node process" x="850.0" y="5159.0" width="240" height="58" rx="8"/>
+<text class="code" x="854.0" y="5153.0" text-anchor="start">56</text>
+<text class="ntext" x="970" y="5168.0" text-anchor="middle" dominant-baseline="central">在本機產生一個沒有金鑰密碼</text>
+<text class="ntext" x="970" y="5188.0" text-anchor="middle" dominant-baseline="central">的金鑰檔, 所在目錄不存在時</text>
+<text class="ntext" x="970" y="5208.0" text-anchor="middle" dominant-baseline="central">一併建立</text>
+</g>
+<g id="57" class="n">
+<polygon class="node decision" points="970,5284.0 1100.0,5332.0 970,5380.0 840.0,5332.0"/>
+<text class="code" x="897" y="5300.0" text-anchor="end">57</text>
+<text class="ntext" x="970" y="5332.0" text-anchor="middle" dominant-baseline="central">產生成功?</text>
+</g>
+<g id="58" class="n">
+<rect class="node process" x="850.0" y="5428.0" width="240" height="58" rx="8"/>
+<text class="code" x="854.0" y="5422.0" text-anchor="start">58</text>
+<text class="ntext" x="970" y="5447.0" text-anchor="middle" dominant-baseline="central">回報使用者</text>
+<text class="ntext" x="970" y="5467.0" text-anchor="middle" dominant-baseline="central">無法產生金鑰檔</text>
+</g>
+<g id="59" class="n">
+<rect class="node process" x="470.0" y="5428.0" width="240" height="58" rx="8"/>
+<text class="code" x="474.0" y="5422.0" text-anchor="start">59</text>
+<text class="ntext" x="590" y="5447.0" text-anchor="middle" dominant-baseline="central">把本機第一個金鑰檔的</text>
+<text class="ntext" x="590" y="5467.0" text-anchor="middle" dominant-baseline="central">公鑰附加到遠端主機</text>
+</g>
+<g id="60" class="n">
+<polygon class="node decision" points="590,5534.0 720.0,5582.0 590,5630.0 460.0,5582.0"/>
+<text class="code" x="517" y="5550.0" text-anchor="end">60</text>
+<text class="ntext" x="590" y="5582.0" text-anchor="middle" dominant-baseline="central">附加成功?</text>
+</g>
+<g id="61" class="n">
+<rect class="node process" x="850.0" y="5553.0" width="240" height="58" rx="8"/>
+<text class="code" x="854.0" y="5547.0" text-anchor="start">61</text>
+<text class="ntext" x="970" y="5572.0" text-anchor="middle" dominant-baseline="central">記下遠端主機</text>
+<text class="ntext" x="970" y="5592.0" text-anchor="middle" dominant-baseline="central">不再詢問</text>
+</g>
+<g id="62" class="n">
+<rect class="node process" x="470.0" y="5678.0" width="240" height="58" rx="8"/>
+<text class="code" x="474.0" y="5672.0" text-anchor="start">62</text>
+<text class="ntext" x="590" y="5707.0" text-anchor="middle" dominant-baseline="central">回報使用者附加的結果</text>
+</g>
+<g id="63" class="n">
+<rect class="node terminal" x="470.0" y="5784.0" width="240" height="58" rx="29.0"/>
+<text class="code" x="474.0" y="5778.0" text-anchor="start">63</text>
+<text class="ntext" x="590" y="5813.0" text-anchor="middle" dominant-baseline="central">結束</text>
+</g>
+</svg>
+</main>
+</body>
+</html>
