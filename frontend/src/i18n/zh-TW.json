@@ -139,9 +139,12 @@
   "upload.updateTitle": "更新遠端程式",
   "upload.uploadText": "GPU Monitor 須將遠端程式上傳至 {host}。按下「確認」後開始上傳。",
   "upload.updateText": "{host} 上的遠端程式較此 GPU Monitor 舊，將以新版取代。按下「確認」後開始更新。",
+  "upload.updateSameText": "{host} 上的遠端程式與此 GPU Monitor 內附的不同，將予以取代。按下「確認」後開始更新。",
   "upload.path": "放置路徑",
   "upload.remoteVersion": "現有版本",
   "upload.newVersion": "新版本",
+  "upload.remoteHash": "現有雜湊值",
+  "upload.newHash": "新雜湊值",
 
   "errors.title": "連線錯誤",
   "errors.operationTitle": "操作失敗",

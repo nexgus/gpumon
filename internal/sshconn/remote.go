@@ -69,12 +69,23 @@ type UploadRequest struct {
 	// Update 為真表示更新, 即遠端的程式版號低於 GUI, 或兩者相等而內容雜湊值不同,
 	// 且遠端程式未在執行; 為假表示首次上傳, 即無法取得遠端的程式版號.
 	Update bool
-	// RemoteVersion 為遠端現有的完整版本字串 (--version 輸出中的原文), 首次上傳時
-	// 為空字串.
+	// RemoteVersion 為遠端現有的程式版號 x.y.z[-stage.N] (不含 "+" 與其後的部分),
+	// 首次上傳時為空字串.
 	RemoteVersion string
-	// NewVersion 為即將上傳的版本, 即 GUI 的程式版號後接 "+" 與 GUI 的內容雜湊值.
+	// NewVersion 為即將上傳的程式版號, 即 GUI 的程式版號.
 	NewVersion string
+	// RemoteHash 為遠端現有的內容雜湊值, 取自遠端 --version 的輸出; 遠端沒有內容
+	// 雜湊值時為 UnknownHash, 首次上傳時為空字串.
+	RemoteHash string
+	// NewHash 為即將上傳的內容雜湊值, 即 GUI 的內容雜湊值.
+	NewHash string
+	// SameVersion 為真表示更新的原因是兩者程式版號相同而內容不同, 為假表示遠端的
+	// 程式版號低於 GUI; 首次上傳時為假.
+	SameVersion bool
 }
+
+// UnknownHash 為遠端沒有內容雜湊值時, UploadRequest.RemoteHash 的值.
+const UnknownHash = "unknown"
 
 // UploadConfirmFunc 等待使用者確認上傳, 回傳 nil 表示確認. 回傳錯誤時不上傳, 部署
 // 隨即中止. ctx 於呼叫端的 context 結束或 SSH 連線中斷時結束, 回呼函數應隨之
@@ -184,10 +195,15 @@ func (c *Client) Deploy(ctx context.Context, opts DeployOptions) (*Deployment, e
 		if opts.ConfirmUpload != nil {
 			req := UploadRequest{
 				Host: c.Host, User: c.ssh.User(), Path: dep.Path,
-				Update: dep.Remote != nil, NewVersion: guiVer.String() + "+" + guiHash,
+				Update: dep.Remote != nil, NewVersion: guiVer.String(), NewHash: guiHash,
 			}
 			if dep.Remote != nil {
-				req.RemoteVersion = dep.Remote.Full
+				req.RemoteVersion = dep.Remote.Version.String()
+				req.SameVersion = dep.Remote.Version.Compare(guiVer) == 0
+				req.RemoteHash = dep.Remote.Hash
+				if req.RemoteHash == "" {
+					req.RemoteHash = UnknownHash
+				}
 			}
 			if err := c.confirmUpload(ctx, opts.ConfirmUpload, req, opts.CommandTimeout); err != nil {
 				return nil, err

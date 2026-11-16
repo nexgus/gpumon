@@ -76,14 +76,14 @@ func TestUploadNoticeThenConnect(t *testing.T) {
 			ls := newLinks()
 			req := freshUpload()
 			if update {
-				req.Update, req.RemoteVersion = true, "0.1.0"
+				req.Update, req.RemoteVersion, req.RemoteHash, req.NewHash, req.SameVersion = true, "0.1.0", "aaaaaaa", "bbbbbbb", true
 			}
 			e.dialer.set(uploadDialer(okDialer(ls, "alice", nvidiaDevices(0)), func(int) *sshconn.UploadRequest { return req }, nil))
 			e.m.Connect(id)
 			n := e.waitNotices(1)[0]
 			want := UploadNotice{ID: n.ID, Host: id, Name: "alice@gpu01", Path: "~/.gpumon/gpumon", Update: update, NewVersion: "0.2.0"}
 			if update {
-				want.RemoteVersion = "0.1.0"
+				want.RemoteVersion, want.RemoteHash, want.NewHash, want.SameVersion = "0.1.0", "aaaaaaa", "bbbbbbb", true
 			}
 			if n != want || n.ID == "" {
 				t.Fatalf("notice %+v, want %+v", n, want)

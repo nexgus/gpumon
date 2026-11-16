@@ -162,9 +162,12 @@
   "upload.updateTitle": "Update Remote Program",
   "upload.uploadText": "GPU Monitor needs to upload its remote program to {host}. The upload starts when you click OK.",
   "upload.updateText": "The remote program on {host} is older than this GPU Monitor and will be replaced with the new version. The update starts when you click OK.",
+  "upload.updateSameText": "The remote program on {host} differs from the one included in this GPU Monitor and will be replaced. The update starts when you click OK.",
   "upload.path": "Location",
   "upload.remoteVersion": "Current version",
   "upload.newVersion": "New version",
+  "upload.remoteHash": "Current hash",
+  "upload.newHash": "New hash",
 
   "errors.title": "Connection Errors",
   "errors.operationTitle": "Operation Failed",

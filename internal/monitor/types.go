@@ -117,9 +117,16 @@ type UploadNotice struct {
 	// Update 為真表示更新, 為假表示首次上傳.
 	Update bool `json:"update"`
 	// RemoteVersion 為遠端現有的程式版號, 首次上傳時為空字串; NewVersion 為即將
-	// 上傳的程式版號.
+	// 上傳的程式版號. 兩者皆不含內容雜湊值.
 	RemoteVersion string `json:"remote_version"`
 	NewVersion    string `json:"new_version"`
+	// RemoteHash 為遠端現有的內容雜湊值, 遠端沒有時為 unknown, 首次上傳時
+	// 為空字串; NewHash 為即將上傳的內容雜湊值.
+	RemoteHash string `json:"remote_hash"`
+	NewHash    string `json:"new_hash"`
+	// SameVersion 為真表示更新的原因是兩者程式版號相同而內容不同, 為假表示遠端的
+	// 程式版號較低.
+	SameVersion bool `json:"same_version"`
 }
 
 // UploadClosed 為上傳通知已失效的通知內容, 例如等待確認期間使用者按下中斷連線或

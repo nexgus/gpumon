@@ -45,6 +45,8 @@ type deployFixture struct {
 	procLs   string
 	platform string
 	delay    time.Duration
+	// versionOut 非空時, 作為遠端程式 --version 的輸出, 不實際執行該檔案.
+	versionOut string
 }
 
 func newDeployFixture(t *testing.T) *deployFixture {
@@ -54,6 +56,9 @@ func newDeployFixture(t *testing.T) *deployFixture {
 	f := &deployFixture{srv: srv, platform: "Linux x86_64"}
 	srv.execHook = func(cmd string) (string, int, bool) {
 		time.Sleep(f.delay)
+		if f.versionOut != "" && strings.HasSuffix(cmd, " --version'") {
+			return f.versionOut, 0, true
+		}
 		switch cmd {
 		case "sh -c 'uname -sm'":
 			return f.platform + "\n", 0, true
@@ -91,8 +96,8 @@ func (f *deployFixture) countCommand(substr string) int {
 func TestDeployFlow(t *testing.T) {
 	f := newDeployFixture(t)
 	ctx := context.Background()
-	guiBin := fakeRemote("0.2.0", 1)
-	opts := DeployOptions{Binary: guiBin, GUIVersion: "0.2.0", GUIProtocol: 1}
+	guiBin := fakeRemote("0.3.0", 1)
+	opts := DeployOptions{Binary: guiBin, GUIVersion: "0.3.0", GUIProtocol: 1}
 
 	// 全新部署.
 	dep, err := f.c.Deploy(ctx, opts)
@@ -124,9 +129,9 @@ func TestDeployFlow(t *testing.T) {
 
 	// 版號相同且內容雜湊值相同, 不上傳也不檢查是否正在執行.
 	guiHash := version.ContentHash(guiBin)
-	writeFile(t, f.remotePath(), string(fakeRemoteHash("0.2.0", guiHash, 1)), 0o755)
+	writeFile(t, f.remotePath(), string(fakeRemoteHash("0.3.0", guiHash, 1)), 0o755)
 	dep, err = f.c.Deploy(ctx, opts)
-	if err != nil || dep.Uploaded || dep.Remote == nil || dep.Remote.Version.String() != "0.2.0" || dep.Remote.Hash != guiHash {
+	if err != nil || dep.Uploaded || dep.Remote == nil || dep.Remote.Version.String() != "0.3.0" || dep.Remote.Hash != guiHash {
 		t.Errorf("equal version and hash: %+v %v", dep, err)
 	}
 	if n := f.countCommand("/proc"); n != 0 {
@@ -134,7 +139,7 @@ func TestDeployFlow(t *testing.T) {
 	}
 
 	// 版號相同, 內容雜湊值不同且正在執行, 不上傳.
-	other := fakeRemoteHash("0.2.0", "0000000", 1)
+	other := fakeRemoteHash("0.3.0", "0000000", 1)
 	writeFile(t, f.remotePath(), string(other), 0o755)
 	f.procLs = "lrwxrwxrwx 1 u u 0 Nov  5 10:00 /proc/2/exe -> " + f.remotePath() + "\n"
 	dep, err = f.c.Deploy(ctx, opts)
@@ -156,7 +161,7 @@ func TestDeployFlow(t *testing.T) {
 	}
 
 	// 版號相同, 遠端沒有內容雜湊值 (+unknown), 正在執行時不上傳, 否則覆寫.
-	writeFile(t, f.remotePath(), string(fakeRemote("0.2.0", 1)), 0o755)
+	writeFile(t, f.remotePath(), string(fakeRemote("0.3.0", 1)), 0o755)
 	f.procLs = "lrwxrwxrwx 1 u u 0 Nov  5 10:00 /proc/2/exe -> " + f.remotePath() + "\n"
 	if dep, err = f.c.Deploy(ctx, opts); err != nil || dep.Uploaded || dep.Remote.Hash != "" {
 		t.Errorf("no hash, running: %+v %v", dep, err)
@@ -167,8 +172,8 @@ func TestDeployFlow(t *testing.T) {
 	}
 
 	// 遠端較高, 不上傳, 協定版本取遠端的值.
-	writeFile(t, f.remotePath(), string(fakeRemote("0.3.0-alpha.1", 1)), 0o755)
-	dep, err = f.c.Deploy(ctx, DeployOptions{Binary: guiBin, GUIVersion: "0.2.0", GUIProtocol: 2})
+	writeFile(t, f.remotePath(), string(fakeRemote("0.4.0-alpha.1", 1)), 0o755)
+	dep, err = f.c.Deploy(ctx, DeployOptions{Binary: guiBin, GUIVersion: "0.3.0", GUIProtocol: 2})
 	if err != nil || dep.Uploaded || dep.Protocol != 1 {
 		t.Errorf("higher remote: %+v %v", dep, err)
 	}
@@ -204,14 +209,14 @@ func TestDeployFlow(t *testing.T) {
 	}
 
 	// 遠端協定版本較低, 可用.
-	writeFile(t, f.remotePath(), string(fakeRemoteHash("0.2.0", guiHash, 1)), 0o755)
-	dep, err = f.c.Deploy(ctx, DeployOptions{Binary: guiBin, GUIVersion: "0.2.0", GUIProtocol: 2})
+	writeFile(t, f.remotePath(), string(fakeRemoteHash("0.3.0", guiHash, 1)), 0o755)
+	dep, err = f.c.Deploy(ctx, DeployOptions{Binary: guiBin, GUIVersion: "0.3.0", GUIProtocol: 2})
 	if err != nil || dep.Uploaded || dep.Protocol != 1 {
 		t.Errorf("older protocol: %+v %v", dep, err)
 	}
 
 	// 遠端協定版本較高, 不可用.
-	writeFile(t, f.remotePath(), string(fakeRemoteHash("0.2.0", guiHash, 2)), 0o755)
+	writeFile(t, f.remotePath(), string(fakeRemoteHash("0.3.0", guiHash, 2)), 0o755)
 	_, err = f.c.Deploy(ctx, opts)
 	expectKind(t, err, KindProtocolTooNew)
 	if !strings.Contains(err.Error(), "update GPU Monitor") {
@@ -345,8 +350,8 @@ func TestDeployConfirmUpload(t *testing.T) {
 	f := newDeployFixture(t)
 	ctx := context.Background()
 	rec := &confirmRecorder{t: t, f: f}
-	guiBin := fakeRemote("0.2.0", 1)
-	opts := DeployOptions{Binary: guiBin, GUIVersion: "0.2.0", GUIProtocol: 1, ConfirmUpload: rec.fn}
+	guiBin := fakeRemote("0.3.0", 1)
+	opts := DeployOptions{Binary: guiBin, GUIVersion: "0.3.0", GUIProtocol: 1, ConfirmUpload: rec.fn}
 
 	// 首次上傳: 呼叫回呼函數, 呼叫當下目錄尚未建立.
 	dep, err := f.c.Deploy(ctx, opts)
@@ -356,7 +361,7 @@ func TestDeployConfirmUpload(t *testing.T) {
 	if len(rec.reqs) != 1 {
 		t.Fatalf("callback called %d times for a fresh deploy", len(rec.reqs))
 	}
-	want := UploadRequest{Host: f.srv.host, User: "tester", Path: f.remotePath(), Update: false, RemoteVersion: "", NewVersion: "0.2.0+" + version.ContentHash(guiBin)}
+	want := UploadRequest{Host: f.srv.host, User: "tester", Path: f.remotePath(), Update: false, NewVersion: "0.3.0", NewHash: version.ContentHash(guiBin)}
 	if rec.reqs[0] != want {
 		t.Errorf("fresh request = %+v, want %+v", rec.reqs[0], want)
 	}
@@ -365,11 +370,11 @@ func TestDeployConfirmUpload(t *testing.T) {
 	}
 
 	// 版號與內容雜湊值皆相同, 遠端較高, 遠端較低且正在執行: 皆不呼叫.
-	writeFile(t, f.remotePath(), string(fakeRemoteHash("0.2.0", version.ContentHash(guiBin), 1)), 0o755)
+	writeFile(t, f.remotePath(), string(fakeRemoteHash("0.3.0", version.ContentHash(guiBin), 1)), 0o755)
 	if _, err := f.c.Deploy(ctx, opts); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, f.remotePath(), string(fakeRemote("0.3.0", 1)), 0o755)
+	writeFile(t, f.remotePath(), string(fakeRemote("0.4.0", 1)), 0o755)
 	if _, err := f.c.Deploy(ctx, opts); err != nil {
 		t.Fatal(err)
 	}
@@ -392,7 +397,8 @@ func TestDeployConfirmUpload(t *testing.T) {
 	if len(rec.reqs) != 2 {
 		t.Fatalf("callback called %d times", len(rec.reqs))
 	}
-	want = UploadRequest{Host: f.srv.host, User: "tester", Path: f.remotePath(), Update: true, RemoteVersion: "0.1.0-rc.2+unknown", NewVersion: "0.2.0+" + version.ContentHash(guiBin)}
+	want = UploadRequest{Host: f.srv.host, User: "tester", Path: f.remotePath(), Update: true,
+		RemoteVersion: "0.1.0-rc.2", NewVersion: "0.3.0", RemoteHash: UnknownHash, NewHash: version.ContentHash(guiBin)}
 	if rec.reqs[1] != want {
 		t.Errorf("update request = %+v, want %+v", rec.reqs[1], want)
 	}
@@ -402,6 +408,71 @@ func TestDeployConfirmUpload(t *testing.T) {
 	if data, _ := os.ReadFile(f.remotePath()); string(data) != string(guiBin) {
 		t.Error("program was not updated after the confirmation")
 	}
+}
+
+func TestDeployConfirmUploadHash(t *testing.T) {
+	ctx := context.Background()
+	guiBin := fakeRemote("0.4.0", 1)
+	opts := DeployOptions{Binary: guiBin, GUIVersion: "0.4.0", GUIProtocol: 1}
+	run := func(t *testing.T, f *deployFixture, opts DeployOptions) UploadRequest {
+		t.Helper()
+		rec := &confirmRecorder{t: t, f: f}
+		opts.ConfirmUpload = rec.fn
+		dep, err := f.c.Deploy(ctx, opts)
+		if err != nil || !dep.Uploaded || len(rec.reqs) != 1 {
+			t.Fatalf("deploy: %+v %v, %d requests", dep, err, len(rec.reqs))
+		}
+		return rec.reqs[0]
+	}
+
+	t.Run("hash from the output, lower version", func(t *testing.T) {
+		f := newDeployFixture(t)
+		writeFile(t, f.remotePath(), string(fakeRemoteHash("0.3.0", "abcdef0", 1)), 0o755)
+		req := run(t, f, opts)
+		if req.RemoteHash != "abcdef0" || req.SameVersion || req.RemoteVersion != "0.3.0" || req.NewHash != version.ContentHash(guiBin) {
+			t.Errorf("request = %+v", req)
+		}
+	})
+
+	t.Run("hash from the output, same version", func(t *testing.T) {
+		f := newDeployFixture(t)
+		writeFile(t, f.remotePath(), string(fakeRemoteHash("0.4.0", "abcdef0", 1)), 0o755)
+		req := run(t, f, opts)
+		if req.RemoteHash != "abcdef0" || !req.SameVersion {
+			t.Errorf("request = %+v", req)
+		}
+	})
+
+	t.Run("no hash in the output", func(t *testing.T) {
+		f := newDeployFixture(t)
+		writeFile(t, f.remotePath(), string(fakeRemote("0.4.0", 1)), 0o755)
+		req := run(t, f, opts)
+		if req.RemoteHash != UnknownHash || !req.SameVersion {
+			t.Errorf("request = %+v", req)
+		}
+	})
+
+	t.Run("commit hash of an old remote is not shown", func(t *testing.T) {
+		f := newDeployFixture(t)
+		writeFile(t, f.remotePath(), string(fakeRemoteHash("0.2.0", "1234567", 1)), 0o755)
+		req := run(t, f, opts)
+		if req.RemoteHash != UnknownHash || req.SameVersion {
+			t.Errorf("request = %+v", req)
+		}
+	})
+
+	t.Run("the remote file is not read", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("root can read any file")
+		}
+		f := newDeployFixture(t)
+		writeFile(t, f.remotePath(), string(fakeRemote("0.3.0", 1)), 0o000)
+		f.versionOut = "gpumon 0.3.0+abcdef0 (protocol 1)\n"
+		req := run(t, f, opts)
+		if req.RemoteHash != "abcdef0" {
+			t.Errorf("request = %+v", req)
+		}
+	})
 }
 
 func TestDeployConfirmUploadDeclined(t *testing.T) {

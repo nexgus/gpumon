@@ -31,6 +31,10 @@ var programVersionRE = regexp.MustCompile(
 var versionOutputRE = regexp.MustCompile(
 	`^gpumon (0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?(?:\+([0-9a-f]{7}|unknown)(-dirty)?)? \(protocol ([1-9][0-9]*)\)$`)
 
+// hashSinceVersion 為遠端程式開始於 --version 輸出內容雜湊值的程式版號. 低於此版號
+// 的遠端程式於 "+" 之後輸出 commit hash, 不視為內容雜湊值.
+var hashSinceVersion = ProgramVersion{Major: 0, Minor: 3, Patch: 0, stage: stageNone}
+
 // ParseProgramVersion 解析 x.y.z[-stage.N] 形式的程式版號.
 func ParseProgramVersion(s string) (ProgramVersion, error) {
 	m := programVersionRE.FindStringSubmatch(s)
@@ -116,10 +120,8 @@ func (v ProgramVersion) Compare(o ProgramVersion) int {
 // RemoteInfo 為自遠端程式 --version 輸出取得的資訊.
 type RemoteInfo struct {
 	Version ProgramVersion
-	// Full 為輸出中 "gpumon " 與 " (protocol" 之間的完整版本字串原文.
-	Full string
-	// Hash 為遠端的內容雜湊值; 遠端沒有內容雜湊值時為空字串, 即輸出沒有 "+" 一段,
-	// 為 "+unknown", 或帶有 "-dirty".
+	// Hash 為遠端的內容雜湊值; 遠端沒有內容雜湊值時為空字串, 即程式版號低於
+	// hashSinceVersion, 輸出沒有 "+" 一段, 為 "+unknown", 或帶有 "-dirty".
 	Hash     string
 	Protocol int
 }
@@ -141,11 +143,10 @@ func ParseVersionOutput(out string) (RemoteInfo, error) {
 		return RemoteInfo{}, fmt.Errorf("invalid protocol version %q", m[9])
 	}
 	hash := ""
-	if m[7] != "unknown" && m[8] == "" {
+	if m[7] != "unknown" && m[8] == "" && v.Compare(hashSinceVersion) >= 0 {
 		hash = m[7]
 	}
-	full := strings.TrimSuffix(strings.TrimPrefix(line, "gpumon "), " (protocol "+m[9]+")")
-	return RemoteInfo{Version: v, Full: full, Hash: hash, Protocol: proto}, nil
+	return RemoteInfo{Version: v, Hash: hash, Protocol: proto}, nil
 }
 
 // uploadAction 為決定是否上傳的結果.

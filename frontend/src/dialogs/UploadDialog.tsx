@@ -9,13 +9,18 @@ import { useStore } from "../state/store";
 function UploadForm({ notice }: { notice: UploadNotice }) {
   const t = useT();
   const host = <span className="mono strong">{notice.name || notice.host}</span>;
+  const text = notice.update
+    ? notice.same_version
+      ? "upload.updateSameText"
+      : "upload.updateText"
+    : "upload.uploadText";
   return (
     <Dialog
       title={t(notice.update ? "upload.updateTitle" : "upload.uploadTitle")}
       width={400}
       onSubmit={() => confirmUpload(notice.id)}
     >
-      <p className="dialog-text">{t.rich(notice.update ? "upload.updateText" : "upload.uploadText", { host })}</p>
+      <p className="dialog-text">{t.rich(text, { host })}</p>
       <dl className="upload-facts">
         <dt>{t("upload.path")}</dt>
         <dd className="mono">{notice.path}</dd>
@@ -25,6 +30,10 @@ function UploadForm({ notice }: { notice: UploadNotice }) {
             <dd className="mono">{notice.remote_version}</dd>
             <dt>{t("upload.newVersion")}</dt>
             <dd className="mono">{notice.new_version}</dd>
+            <dt>{t("upload.remoteHash")}</dt>
+            <dd className="mono">{notice.remote_hash}</dd>
+            <dt>{t("upload.newHash")}</dt>
+            <dd className="mono">{notice.new_hash}</dd>
           </>
         )}
       </dl>

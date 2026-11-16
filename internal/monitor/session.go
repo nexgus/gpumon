@@ -329,6 +329,7 @@ func (s *session) auth(ctx context.Context, reconnect bool) Auth {
 		return s.m.uploads.ask(uctx, UploadNotice{
 			Host: s.id, Name: name, Path: uploadPath,
 			Update: req.Update, RemoteVersion: req.RemoteVersion, NewVersion: req.NewVersion,
+			RemoteHash: req.RemoteHash, NewHash: req.NewHash, SameVersion: req.SameVersion,
 		})
 	}
 	if reconnect {

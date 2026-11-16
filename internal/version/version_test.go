@@ -1,6 +1,7 @@
 package version
 
 import (
+	"bytes"
 	"regexp"
 	"testing"
 )
@@ -19,5 +20,13 @@ func TestRemoteFull(t *testing.T) {
 	re := regexp.MustCompile(`^` + regexp.QuoteMeta(VERSION) + `\+[0-9a-f]{7}$`)
 	if got := RemoteFull(); !re.MatchString(got) {
 		t.Errorf("RemoteFull() = %q", got)
+	}
+}
+
+func TestContentHashReader(t *testing.T) {
+	content := []byte("some remote program content")
+	got, err := ContentHashReader(bytes.NewReader(content))
+	if err != nil || got != ContentHash(content) {
+		t.Errorf("ContentHashReader = %q, %v; want %q", got, err, ContentHash(content))
 	}
 }

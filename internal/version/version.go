@@ -6,8 +6,10 @@
 package version
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
 	"os"
 )
 
@@ -36,8 +38,18 @@ func Full() string {
 // ContentHash 回傳遠端程式檔案內容的 SHA-256 雜湊值, 以小寫十六進位表示, 取前 7 個
 // 字元. 遠端程式與 GUI 皆以此函數計算.
 func ContentHash(content []byte) string {
-	sum := sha256.Sum256(content)
-	return hex.EncodeToString(sum[:])[:7]
+	// 自記憶體讀取不會失敗, 故不處理錯誤.
+	h, _ := ContentHashReader(bytes.NewReader(content))
+	return h
+}
+
+// ContentHashReader 自 r 串流讀取內容並回傳其 ContentHash, 不把內容整個讀入記憶體.
+func ContentHashReader(r io.Reader) (string, error) {
+	h := sha256.New()
+	if _, err := io.Copy(h, r); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil))[:7], nil
 }
 
 // SelfContentHash 讀取目前執行檔的內容並回傳其 ContentHash.

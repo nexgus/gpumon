@@ -195,7 +195,9 @@ export interface KeySetupResult {
 }
 
 // UploadNotice 為上傳遠端程式之前的通知. update 為真表示更新, 為假表示首次上傳;
-// remote_version 於首次上傳時為空字串. path 恆為 ~/.gpumon/gpumon.
+// remote_version 與 remote_hash 於首次上傳時為空字串; 兩個版本皆為不含內容雜湊值的
+// 程式版號, remote_hash 於遠端沒有內容雜湊值時為 unknown. same_version 為真表示更新的原因是兩者
+// 程式版號相同而內容不同. path 恆為 ~/.gpumon/gpumon.
 export interface UploadNotice {
   id: string;
   host: string;
@@ -204,6 +206,9 @@ export interface UploadNotice {
   update: boolean;
   remote_version: string;
   new_version: string;
+  remote_hash: string;
+  new_hash: string;
+  same_version: boolean;
 }
 
 export interface UploadClosed {

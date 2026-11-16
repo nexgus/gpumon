@@ -60,17 +60,21 @@ func TestParseVersionOutput(t *testing.T) {
 	good := []struct {
 		in    string
 		ver   string
-		full  string
 		hash  string
 		proto int
 	}{
-		{"gpumon 0.1.0+3f2a9c1 (protocol 1)\n", "0.1.0", "0.1.0+3f2a9c1", "3f2a9c1", 1},
-		{"gpumon 0.2.0-beta.3+3f2a9c1-dirty (protocol 2)\n", "0.2.0-beta.3", "0.2.0-beta.3+3f2a9c1-dirty", "", 2},
-		{"gpumon 0.1.0+unknown (protocol 1)\n", "0.1.0", "0.1.0+unknown", "", 1},
-		{"gpumon 0.1.0+unknown-dirty (protocol 12)", "0.1.0", "0.1.0+unknown-dirty", "", 12},
-		{"gpumon 0.1.0 (protocol 1)\n", "0.1.0", "0.1.0", "", 1},
-		{"gpumon 0.2.0-rc.1 (protocol 4)", "0.2.0-rc.1", "0.2.0-rc.1", "", 4},
-		{"gpumon 10.20.30-rc.0+abcdef0 (protocol 3)\n", "10.20.30-rc.0", "10.20.30-rc.0+abcdef0", "abcdef0", 3},
+		{"gpumon 0.1.0+3f2a9c1 (protocol 1)\n", "0.1.0", "", 1},
+		{"gpumon 0.2.9+3f2a9c1 (protocol 1)\n", "0.2.9", "", 1},
+		{"gpumon 0.3.0-beta.1+3f2a9c1 (protocol 1)\n", "0.3.0-beta.1", "", 1},
+		{"gpumon 0.3.0+3f2a9c1 (protocol 1)\n", "0.3.0", "3f2a9c1", 1},
+		{"gpumon 0.3.1+3f2a9c1 (protocol 1)\n", "0.3.1", "3f2a9c1", 1},
+		{"gpumon 1.0.0-rc.1+3f2a9c1 (protocol 1)\n", "1.0.0-rc.1", "3f2a9c1", 1},
+		{"gpumon 0.2.0-beta.3+3f2a9c1-dirty (protocol 2)\n", "0.2.0-beta.3", "", 2},
+		{"gpumon 0.1.0+unknown (protocol 1)\n", "0.1.0", "", 1},
+		{"gpumon 0.1.0+unknown-dirty (protocol 12)", "0.1.0", "", 12},
+		{"gpumon 0.1.0 (protocol 1)\n", "0.1.0", "", 1},
+		{"gpumon 0.2.0-rc.1 (protocol 4)", "0.2.0-rc.1", "", 4},
+		{"gpumon 10.20.30-rc.0+abcdef0 (protocol 3)\n", "10.20.30-rc.0", "abcdef0", 3},
 	}
 	for _, c := range good {
 		info, err := ParseVersionOutput(c.in)
@@ -78,8 +82,8 @@ func TestParseVersionOutput(t *testing.T) {
 			t.Errorf("ParseVersionOutput(%q): %v", c.in, err)
 			continue
 		}
-		if info.Version.String() != c.ver || info.Full != c.full || info.Hash != c.hash || info.Protocol != c.proto {
-			t.Errorf("ParseVersionOutput(%q) = %s, %q, %q, %d", c.in, info.Version, info.Full, info.Hash, info.Protocol)
+		if info.Version.String() != c.ver || info.Hash != c.hash || info.Protocol != c.proto {
+			t.Errorf("ParseVersionOutput(%q) = %s, %q, %d", c.in, info.Version, info.Hash, info.Protocol)
 		}
 	}
 	bad := []string{
