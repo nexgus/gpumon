@@ -18,6 +18,7 @@ PRODUCT_PATHS=(
     frontend
     assets
     licenses
+    LICENSE.md
     msi/gui.wxs.in
     go.mod
     go.sum

@@ -35,6 +35,11 @@
   padding: 20px;
 }
 
+/* 內容超出視窗高度時由內容區捲動, 各區塊維持原高度, 不被壓縮. */
+.about-panel > * {
+  flex: none;
+}
+
 .about-head {
   display: flex;
   align-items: center;

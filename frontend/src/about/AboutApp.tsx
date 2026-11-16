@@ -9,6 +9,7 @@ import { formatDateTime } from "../format";
 import { useT, type Translator } from "../i18n";
 import appIcon from "./app-icon.png";
 import { licenseView, paragraphs, type Component } from "./licenses";
+import projectLicense from "../../../LICENSE.md?raw";
 
 // webViewVersion 由 user agent 取出 WebView 的版本: Windows 的 WebView2 為 Edg/<版本>,
 // macOS 的 WKWebView 為 AppleWebKit/<版本>.
@@ -90,13 +91,42 @@ function AboutPanel() {
           </div>
         ))}
       </dl>
-      <div className="flex1" />
       <div className="about-actions">
         <button type="button" className="btn" onClick={copy}>
           {copied ? t("about.copied") : t("about.copy")}
         </button>
       </div>
+      <ProjectLicense />
     </div>
+  );
+}
+
+// ProjectLicense 顯示本專案 LICENSE.md 的全文, 第一段 (授權名稱) 為標題. 條文為英文原文,
+// 不隨語言設定翻譯.
+function ProjectLicense() {
+  const [title, ...body] = useMemo(() => paragraphs(projectLicense), []);
+  return (
+    <section className="license-text" lang="en">
+      <div className="license-heading">{title?.join(" ")}</div>
+      <Paragraphs items={body} />
+    </section>
+  );
+}
+
+function Paragraphs({ items }: { items: string[][] }) {
+  return (
+    <>
+      {items.map((lines, i) => (
+        <p key={i} className="license-body">
+          {lines.map((line, k) => (
+            <Fragment key={k}>
+              {k > 0 && <br />}
+              {line}
+            </Fragment>
+          ))}
+        </p>
+      ))}
+    </>
   );
 }
 
@@ -172,16 +202,7 @@ function LicensesPanel() {
                 </div>
               ))}
             </div>
-            {paragraphs(lt.body).map((lines, i) => (
-              <p key={i} className="license-body">
-                {lines.map((line, k) => (
-                  <Fragment key={k}>
-                    {k > 0 && <br />}
-                    {line}
-                  </Fragment>
-                ))}
-              </p>
-            ))}
+            <Paragraphs items={paragraphs(lt.body)} />
           </section>
         ))}
       </div>
