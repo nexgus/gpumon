@@ -191,6 +191,7 @@ const settings: SettingsData = {
       : params.get("pfilter") === "none"
         ? { "sweetener@10.90.20.55": { gpus: [], user: "", command: "blender" } }
         : {},
+  no_key_setup_prompt: [],
 };
 
 const choices: Choices = {
@@ -704,6 +705,8 @@ export const backend: Backend = {
   },
   async answerPrompt() {},
   async cancelPrompt() {},
+  async answerHostKey() {},
+  async answerKeySetup() {},
   async confirmUpload() {},
   async liveAll() {
     return hosts.map(makeLive);

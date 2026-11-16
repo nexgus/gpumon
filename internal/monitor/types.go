@@ -90,8 +90,7 @@ type Prompt struct {
 	Host string     `json:"host"`
 	Name string     `json:"name"`
 	Kind PromptKind `json:"kind"`
-	// User 與 Server 為要登入的帳號與主機, 只用於登入密碼; 經由跳板主機連線時
-	// 可能是跳板主機.
+	// User 與 Server 為要登入的帳號與主機表單的位址, 只用於登入密碼.
 	User   string `json:"user"`
 	Server string `json:"server"`
 	// KeyFile 為金鑰檔的路徑, 只用於金鑰密碼.
@@ -127,6 +126,93 @@ type UploadNotice struct {
 // SSH 連線中斷. 前端收到後關閉對應的通知視窗.
 type UploadClosed struct {
 	ID string `json:"id"`
+}
+
+// HostKeyInfo 為一把主機金鑰的種類與指紋.
+type HostKeyInfo struct {
+	// KeyType 為金鑰種類, 例如 ssh-ed25519.
+	KeyType string `json:"key_type"`
+	// Fingerprint 為 OpenSSH 格式的 SHA256 指紋, 例如 "SHA256:...".
+	Fingerprint string `json:"fingerprint"`
+}
+
+// HostKeyPrompt 為遠端主機的主機金鑰需要使用者確認的通知內容. 前端以 ID 呼叫
+// AnswerHostKey 回覆.
+type HostKeyPrompt struct {
+	ID string `json:"id"`
+	// Host 為主機的 ID, Name 為顯示名稱.
+	Host string `json:"host"`
+	Name string `json:"name"`
+	// Changed 為假表示未知的主機, 即兩份 known_hosts 皆沒有該主機的記錄; 為真表示
+	// 主機金鑰已變更, 即有記錄但皆與遠端主機的金鑰不同.
+	Changed bool `json:"changed"`
+	// Key 為遠端主機目前的主機金鑰.
+	Key HostKeyInfo `json:"key"`
+	// OldKeys 為已記錄的主機金鑰, 相同者只列一次; 未知的主機時為空陣列.
+	OldKeys []HostKeyInfo `json:"old_keys"`
+}
+
+// HostKeyClosed 為主機金鑰的確認已失效的通知內容, 例如等待回覆期間使用者按下中斷
+// 連線. 前端收到後關閉對應的視窗.
+type HostKeyClosed struct {
+	ID string `json:"id"`
+}
+
+// KeySetupChoice 為使用者對免密碼登入詢問的回答.
+type KeySetupChoice string
+
+// 免密碼登入詢問的三種回答.
+const (
+	// KeySetupNow 為 "立即設定".
+	KeySetupNow KeySetupChoice = "now"
+	// KeySetupLater 為 "暫不設定".
+	KeySetupLater KeySetupChoice = "later"
+	// KeySetupNever 為 "不再詢問".
+	KeySetupNever KeySetupChoice = "never"
+)
+
+// KeySetupPrompt 為詢問是否設定免密碼登入的通知內容. 前端以 ID 呼叫
+// AnswerKeySetup 回覆.
+type KeySetupPrompt struct {
+	ID string `json:"id"`
+	// Host 為主機的 ID, Name 為顯示名稱.
+	Host string `json:"host"`
+	Name string `json:"name"`
+}
+
+// KeySetupClosed 為免密碼登入的詢問已失效的通知內容, 例如等待回覆期間 SSH 連線
+// 中斷或使用者按下中斷連線. 前端收到後關閉對應的視窗.
+type KeySetupClosed struct {
+	ID string `json:"id"`
+}
+
+// KeySetupOutcome 為立即設定免密碼登入的結果.
+type KeySetupOutcome string
+
+// 立即設定的三種結果.
+const (
+	// KeySetupSucceeded 為公鑰已附加至遠端的 ~/.ssh/authorized_keys.
+	KeySetupSucceeded KeySetupOutcome = "success"
+	// KeySetupGenerateFailed 為產生金鑰檔失敗, 未附加公鑰.
+	KeySetupGenerateFailed KeySetupOutcome = "generate-failed"
+	// KeySetupAppendFailed 為附加公鑰失敗; 該主機已記為不再詢問.
+	KeySetupAppendFailed KeySetupOutcome = "append-failed"
+)
+
+// KeySetupResult 為立即設定免密碼登入的結果通知內容. 前端顯示後由使用者關閉, 不需
+// 回覆; 連線流程不等待此視窗.
+type KeySetupResult struct {
+	// Host 為主機的 ID, Name 為顯示名稱.
+	Host    string          `json:"host"`
+	Name    string          `json:"name"`
+	Outcome KeySetupOutcome `json:"outcome"`
+	// KeyFile 為本機金鑰檔的路徑: 成功與附加失敗時為公鑰所屬的金鑰檔, 產生失敗時
+	// 為預定產生的位置.
+	KeyFile string `json:"key_file"`
+	// Generated 表示金鑰檔為本次產生 (或嘗試產生).
+	Generated bool `json:"generated"`
+	// Reason 為失敗的原因, 英文, 可直接顯示; 成功時為空字串.
+	Reason string `json:"reason"`
 }
 
 // LiveGPU 為一張 GPU 最新一筆取樣的數值. 取不到的數值為 nil.
@@ -182,16 +268,22 @@ type DevicesEvent struct {
 }
 
 // 通知的名稱. 每種通知的內容型別依序為 HostStatus, Live, DevicesEvent,
-// ConnectError, Prompt, PromptClosed, UploadNotice 與 UploadClosed.
+// ConnectError, Prompt, PromptClosed, UploadNotice, UploadClosed, HostKeyPrompt,
+// HostKeyClosed, KeySetupPrompt, KeySetupClosed 與 KeySetupResult.
 const (
-	EventHost         = "monitor:host"
-	EventSample       = "monitor:sample"
-	EventDevices      = "monitor:devices"
-	EventError        = "monitor:error"
-	EventPrompt       = "monitor:prompt"
-	EventPromptClosed = "monitor:prompt-closed"
-	EventUpload       = "monitor:upload"
-	EventUploadClosed = "monitor:upload-closed"
+	EventHost           = "monitor:host"
+	EventSample         = "monitor:sample"
+	EventDevices        = "monitor:devices"
+	EventError          = "monitor:error"
+	EventPrompt         = "monitor:prompt"
+	EventPromptClosed   = "monitor:prompt-closed"
+	EventUpload         = "monitor:upload"
+	EventUploadClosed   = "monitor:upload-closed"
+	EventHostKey        = "monitor:host-key"
+	EventHostKeyClosed  = "monitor:host-key-closed"
+	EventKeySetup       = "monitor:key-setup"
+	EventKeySetupClosed = "monitor:key-setup-closed"
+	EventKeySetupResult = "monitor:key-setup-result"
 )
 
 // Notifier 接收本套件送出的通知. Notify 不得阻塞.
@@ -212,7 +304,7 @@ type Code string
 const (
 	// CodeInvalid 為傳入的值不合法.
 	CodeInvalid Code = "invalid"
-	// CodeNotFound 為找不到指定的主機, 記錄檔, 輸入要求或上傳通知.
+	// CodeNotFound 為找不到指定的主機, 記錄檔, 輸入要求, 上傳通知或詢問.
 	CodeNotFound Code = "not-found"
 	// CodeDuplicate 為已有相同 "實際使用者名稱@位址" 的主機.
 	CodeDuplicate Code = "duplicate"

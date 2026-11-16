@@ -15,7 +15,8 @@ const (
 	KindConnect Kind = iota + 1
 	// KindAuth 為認證失敗.
 	KindAuth
-	// KindHostKey 為遠端的 host key 與 known_hosts 所收錄者不符.
+	// KindHostKey 為無法驗證遠端主機的主機金鑰, 包括自動重新連線時主機金鑰需要
+	// 使用者確認, 以及主機金鑰列為撤銷.
 	KindHostKey
 	// KindPlatform 為遠端平台不符, 或無法取得遠端的平台資訊與家目錄.
 	KindPlatform
@@ -25,10 +26,11 @@ const (
 	KindExec
 	// KindProtocolTooNew 為遠端的協定版本高於 GUI 的協定版本.
 	KindProtocolTooNew
-	// KindConfig 為連線設定不合法, 例如缺少使用者名稱, 金鑰檔不存在或
-	// ~/.ssh/config 無法解析.
+	// KindConfig 為連線設定不合法, 例如缺少使用者名稱, ~/.ssh/config 或
+	// known_hosts 無法解析.
 	KindConfig
-	// KindCanceled 為呼叫端取消, 包括 context 取消與回呼函數回傳 ErrCanceled.
+	// KindCanceled 為呼叫端取消, 包括 context 取消, 使用者取消輸入登入密碼, 不接受
+	// 主機金鑰, 以及詢問的回呼函數回傳錯誤.
 	KindCanceled
 )
 
@@ -57,8 +59,8 @@ func (k Kind) String() string {
 	return fmt.Sprintf("kind(%d)", int(k))
 }
 
-// ErrCanceled 由回呼函數回傳, 表示使用者取消輸入; 連線隨即中止, 錯誤種類為
-// KindCanceled.
+// ErrCanceled 由回呼函數回傳, 表示使用者取消. 登入密碼與主機金鑰的回呼函數回傳時
+// 連線隨即中止, 錯誤種類為 KindCanceled; 金鑰密碼的回呼函數回傳時略過該金鑰.
 var ErrCanceled = errors.New("canceled by user")
 
 // Error 為本套件回傳的錯誤. Message 為可直接顯示給使用者的英文說明, Err 為

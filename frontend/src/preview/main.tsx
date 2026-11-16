@@ -4,7 +4,8 @@
 //   collapse=1 (收合 GPU 2), pcollapse=1 (收合第一台主機的程序卡片), mcollapse=1 (收合第一台主機
 //   的最大值卡片), host=<n> (切換至第 n 個主機分頁, 自 0 起), exhaust=1 (一秒後 alice@gpu-lab-02 由
 //   重新連線中因重試用盡轉為未連線), scenario=design|empty|nogpu, live=0 (不送新取樣),
-//   now=<Unix 秒> (固定目前時刻), dialog=add|edit|delete|password|passphrase|errors|upload|update|queue
+//   now=<Unix 秒> (固定目前時刻), dialog=add|edit|delete|password|passphrase|hostkey|hostkeychanged|keysetup|keyresult|errors|upload|update|queue
+//   (keyresult 另可傳 outcome=success|generate-failed|append-failed 與 generated=1),
 //   (queue 依序送出上傳通知, 錯誤與密碼輸入要求, 只顯示第一個; next=<n> 依序按下前 n 個視窗的主要按鍵),
 //   hover=<0 至 1> (於第 n 張曲線圖的該位置懸停, 歷史畫面中靠近 0 或 1 即位於邊緣區), hoverChart=<n>, pin=<0 至 1> (於第 n 張曲線圖
 //   的該位置點選以固定時刻, n 為 hoverChart),
@@ -103,6 +104,49 @@ function scenario(): void {
         attempt: 1,
       });
       break;
+    case "hostkey":
+      mock.emit("monitor:host-key", {
+        id: "k1",
+        host: "sweetener@10.90.20.55",
+        name: "sweetener@10.90.20.55",
+        changed: false,
+        key: { key_type: "ssh-ed25519", fingerprint: "SHA256:5ZkQ0m3vYb8y1nXc2JwTfR9oA7LhUe4dPqGsVtBiKxE" },
+        old_keys: [],
+      });
+      break;
+    case "hostkeychanged":
+      mock.emit("monitor:host-key", {
+        id: "k2",
+        host: "sweetener@10.90.20.55",
+        name: "sweetener@10.90.20.55",
+        changed: true,
+        key: { key_type: "ssh-ed25519", fingerprint: "SHA256:5ZkQ0m3vYb8y1nXc2JwTfR9oA7LhUe4dPqGsVtBiKxE" },
+        old_keys: [
+          { key_type: "ssh-ed25519", fingerprint: "SHA256:Hc7sN2wXr0TjLq9uVf3AyBmP1dKeZo8iGtRb5CnYx4M" },
+          { key_type: "ecdsa-sha2-nistp256", fingerprint: "SHA256:Qm1aZ8kTe6VnWy3uRc0JbHf5LpXo9dSgIiA2tUvNx7E" },
+        ],
+      });
+      break;
+    case "keysetup":
+      mock.emit("monitor:key-setup", { id: "s1", host: "sweetener@10.90.20.55", name: "sweetener@10.90.20.55" });
+      break;
+    case "keyresult": {
+      const outcome = (params.get("outcome") ?? "success") as "success" | "generate-failed" | "append-failed";
+      mock.emit("monitor:key-setup-result", {
+        host: "sweetener@10.90.20.55",
+        name: "sweetener@10.90.20.55",
+        outcome,
+        key_file: "/Users/demo/.ssh/id_ed25519",
+        generated: params.get("generated") === "1",
+        reason:
+          outcome === "generate-failed"
+            ? "open /Users/demo/.ssh/id_ed25519: permission denied"
+            : outcome === "append-failed"
+              ? "remote command failed: exit status 1"
+              : "",
+      });
+      break;
+    }
     case "upload":
     case "update":
       mock.emit("monitor:upload", uploadNotice("u1", "sweetener@10.90.20.55", params.get("dialog") === "update"));

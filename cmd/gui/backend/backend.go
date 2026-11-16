@@ -31,6 +31,11 @@ func init() {
 	application.RegisterEvent[monitor.PromptClosed](monitor.EventPromptClosed)
 	application.RegisterEvent[monitor.UploadNotice](monitor.EventUpload)
 	application.RegisterEvent[monitor.UploadClosed](monitor.EventUploadClosed)
+	application.RegisterEvent[monitor.HostKeyPrompt](monitor.EventHostKey)
+	application.RegisterEvent[monitor.HostKeyClosed](monitor.EventHostKeyClosed)
+	application.RegisterEvent[monitor.KeySetupPrompt](monitor.EventKeySetup)
+	application.RegisterEvent[monitor.KeySetupClosed](monitor.EventKeySetupClosed)
+	application.RegisterEvent[monitor.KeySetupResult](monitor.EventKeySetupResult)
 	application.RegisterEvent[UISettings](EventUISettings)
 	application.RegisterEvent[QuitRequest](EventQuitRequest)
 	application.RegisterEvent[ShowPage](EventShowPage)
@@ -158,7 +163,8 @@ func toErr(err error) error {
 	return &monitor.Error{Code: monitor.CodeFailed, Message: err.Error()}
 }
 
-// HostService 提供主機管理, 連線, 密碼輸入與監看畫面所需的資料.
+// HostService 提供主機管理, 連線, 密碼輸入, 主機金鑰的確認, 免密碼登入的詢問與
+// 監看畫面所需的資料.
 type HostService struct{ b *Backend }
 
 // ServiceShutdown 於程式結束時中斷所有連線, 存檔並銷毀所有密碼.
@@ -204,6 +210,18 @@ func (s *HostService) CancelPrompt(promptID string) error {
 // ConfirmUpload 確認上傳遠端程式的通知, 該次連線隨即開始上傳.
 func (s *HostService) ConfirmUpload(noticeID string) error {
 	return toErr(s.b.monitor.ConfirmUpload(noticeID))
+}
+
+// AnswerHostKey 回覆主機金鑰的確認 ("未知的主機" 或 "主機金鑰已變更" 視窗). accept
+// 為真表示 "連線" 或 "更新並連線", 為假表示 "取消"; 取消時該次連線中止且不顯示錯誤.
+func (s *HostService) AnswerHostKey(promptID string, accept bool) error {
+	return toErr(s.b.monitor.AnswerHostKey(promptID, accept))
+}
+
+// AnswerKeySetup 回覆免密碼登入的詢問. choice 為 "now" (立即設定), "later" (暫不
+// 設定) 或 "never" (不再詢問).
+func (s *HostService) AnswerKeySetup(promptID string, choice monitor.KeySetupChoice) error {
+	return toErr(s.b.monitor.AnswerKeySetup(promptID, choice))
 }
 
 // Live 回傳主機的 devices 資訊, 最新一筆讀數與程序列表.

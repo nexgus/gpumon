@@ -236,8 +236,8 @@ func (s *Store) AddHost(c HostConn) error {
 }
 
 // UpdateHost 編輯識別字串為 id 的主機. 只更換表單的四個欄位, 排列位置, 收合狀態
-// 與程序卡片的排序方式及過濾條件皆保留. 新識別與其他主機重複時回傳
-// ErrDuplicateHost.
+// 與程序卡片的排序方式及過濾條件皆保留; 識別改變時, 免密碼登入的不再詢問清除.
+// 新識別與其他主機重複時回傳 ErrDuplicateHost.
 func (s *Store) UpdateHost(id string, c HostConn) error {
 	c, err := normalizeConn(c)
 	if err != nil {
@@ -277,13 +277,15 @@ func (s *Store) UpdateHost(id string, c HostConn) error {
 				delete(d.ProcFilters, id)
 				d.ProcFilters[newID] = v
 			}
+			// 新的識別指向另一個遠端帳號, 免密碼登入的不再詢問不轉移而清除.
+			d.NoKeySetupPrompt = removeString(d.NoKeySetupPrompt, id)
 		}
 		return nil
 	})
 }
 
-// RemoveHost 刪除主機及其收合狀態與程序卡片的排序方式及過濾條件, 其餘主機的順序
-// 不變.
+// RemoveHost 刪除主機及其收合狀態, 程序卡片的排序方式, 過濾條件與免密碼登入的
+// 不再詢問, 其餘主機的順序不變.
 func (s *Store) RemoveHost(id string) error {
 	return s.update(func(d *Data) error {
 		i := findHost(d, id)
@@ -296,6 +298,7 @@ func (s *Store) RemoveHost(id string) error {
 		d.CollapsedMaxima = removeString(d.CollapsedMaxima, id)
 		delete(d.ProcSorts, id)
 		delete(d.ProcFilters, id)
+		d.NoKeySetupPrompt = removeString(d.NoKeySetupPrompt, id)
 		return nil
 	})
 }
@@ -450,6 +453,29 @@ func (s *Store) SetProcsCollapsed(hostID string, collapsed bool) error {
 		} else {
 			d.CollapsedProcs = removeString(d.CollapsedProcs, hostID)
 		}
+		return nil
+	})
+}
+
+// NoKeySetupPrompt 回傳指定主機是否記為不再詢問免密碼登入.
+func (s *Store) NoKeySetupPrompt(hostID string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, id := range s.data.NoKeySetupPrompt {
+		if id == hostID {
+			return true
+		}
+	}
+	return false
+}
+
+// SetNoKeySetupPrompt 把指定主機記為不再詢問免密碼登入.
+func (s *Store) SetNoKeySetupPrompt(hostID string) error {
+	if hostID == "" {
+		return invalid("host %q", hostID)
+	}
+	return s.update(func(d *Data) error {
+		d.NoKeySetupPrompt = dedupStrings(append(d.NoKeySetupPrompt, hostID))
 		return nil
 	})
 }

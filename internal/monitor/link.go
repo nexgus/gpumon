@@ -20,11 +20,15 @@ type Target struct {
 	ConnectTimeout time.Duration
 }
 
-// Auth 為連線過程中向使用者取得回應的回呼函數 (登入密碼, 金鑰密碼, 上傳遠端程式
-// 之前的確認), 以及保存解密後金鑰的快取.
+// Auth 為連線過程中向使用者取得回應的回呼函數 (登入密碼, 金鑰密碼, 主機金鑰的
+// 確認, 免密碼登入的詢問, 上傳遠端程式之前的確認), 以及保存解密後金鑰的快取.
+// HostKey 與 KeySetup 為 nil 時不詢問, 見 sshconn.Config 的同名欄位.
 type Auth struct {
 	Password      sshconn.PasswordFunc
 	Passphrase    sshconn.PassphraseFunc
+	HostKey       sshconn.HostKeyFunc
+	KeySetup      sshconn.KeySetupFunc
+	KeySetupDone  func(sshconn.KeySetupResult)
 	KeyCache      *sshconn.KeyCache
 	ConfirmUpload sshconn.UploadConfirmFunc
 }
@@ -52,33 +56,40 @@ type Dialer interface {
 	Dial(ctx context.Context, t Target, auth Auth) (Link, error)
 }
 
-// SSHDialer 以 internal/sshconn 實作 Dialer. 欄位的零值即採用 sshconn 的預設值.
+// SSHDialer 以 internal/sshconn 實作 Dialer. 除 KnownHostsPath 外, 欄位的零值即
+// 採用 sshconn 的預設值.
 type SSHDialer struct {
-	// KnownHostsPath, SSHConfigPath 與 HomeDir 對應 sshconn.Config 的同名欄位.
-	KnownHostsPath string
-	SSHConfigPath  string
-	HomeDir        string
+	// KnownHostsPath, OpenSSHKnownHostsPath, SSHConfigPath 與 HomeDir 對應
+	// sshconn.Config 的同名欄位. KnownHostsPath 為程式自己的 known_hosts, 必填.
+	KnownHostsPath        string
+	OpenSSHKnownHostsPath string
+	SSHConfigPath         string
+	HomeDir               string
 	// Agent 對應 sshconn.Config.Agent.
 	Agent sshconn.AgentDialer
 	// Deploy 為部署遠端程式的設定.
 	Deploy sshconn.DeployOptions
 }
 
-// Dial 依序進行 SSH 連線, 部署與啟動遠端程式.
+// Dial 依序進行 SSH 連線, 免密碼登入的詢問, 部署與啟動遠端程式.
 func (d SSHDialer) Dial(ctx context.Context, t Target, auth Auth) (Link, error) {
 	cfg := sshconn.Config{
-		Host:           t.Conn.Addr,
-		Port:           t.Conn.Port,
-		User:           t.Conn.User,
-		KeyFile:        t.Conn.KeyFile,
-		Password:       auth.Password,
-		Passphrase:     auth.Passphrase,
-		KeyCache:       auth.KeyCache,
-		Agent:          d.Agent,
-		ConnectTimeout: t.ConnectTimeout,
-		HomeDir:        d.HomeDir,
-		SSHConfigPath:  d.SSHConfigPath,
-		KnownHostsPath: d.KnownHostsPath,
+		Host:                  t.Conn.Addr,
+		Port:                  t.Conn.Port,
+		User:                  t.Conn.User,
+		KeyFile:               t.Conn.KeyFile,
+		Password:              auth.Password,
+		Passphrase:            auth.Passphrase,
+		HostKey:               auth.HostKey,
+		KeySetup:              auth.KeySetup,
+		KeySetupDone:          auth.KeySetupDone,
+		KeyCache:              auth.KeyCache,
+		Agent:                 d.Agent,
+		ConnectTimeout:        t.ConnectTimeout,
+		HomeDir:               d.HomeDir,
+		SSHConfigPath:         d.SSHConfigPath,
+		KnownHostsPath:        d.KnownHostsPath,
+		OpenSSHKnownHostsPath: d.OpenSSHKnownHostsPath,
 	}
 	opts := d.Deploy
 	if auth.ConfirmUpload != nil {

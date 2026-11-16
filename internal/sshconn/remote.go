@@ -32,8 +32,8 @@ const (
 // 以免動到測試主機上既有的遠端程式.
 var remoteDir = RemoteDir
 
-// confirmKeepalive 為等待上傳確認期間送出 SSH keepalive 的間隔, 與心跳相同.
-// 測試可縮短.
+// confirmKeepalive 為等待使用者回應 (上傳確認, 免密碼登入的詢問) 期間送出 SSH
+// keepalive 的間隔, 與心跳相同. 測試可縮短.
 var confirmKeepalive = 5 * time.Second
 
 // requiredPlatform 為 `uname -sm` 須得到的輸出.
@@ -205,14 +205,26 @@ func (c *Client) Deploy(ctx context.Context, opts DeployOptions) (*Deployment, e
 	return dep, nil
 }
 
-// connectionLost 為等待上傳確認期間 SSH 連線中斷的原因.
+// connectionLost 為等待使用者回應期間 SSH 連線中斷的原因.
 type connectionLost struct{ err error }
 
 func (e *connectionLost) Error() string { return "connection lost: " + e.err.Error() }
 
-// confirmUpload 呼叫確認回呼函數並等待其返回. 等待期間以 keepalive 監看 SSH 連線,
-// 連線中斷 (含無回應超過 replyTimeout) 時結束回呼函數的 ctx.
+// confirmUpload 呼叫上傳確認的回呼函數並等待其返回, 規則見 waitUser.
 func (c *Client) confirmUpload(ctx context.Context, fn UploadConfirmFunc, req UploadRequest, replyTimeout time.Duration) error {
+	return c.waitUser(ctx, replyTimeout, "the confirmation to upload the remote program",
+		"Uploading the remote program to %s was canceled", func(wctx context.Context) error {
+			return fn(wctx, req)
+		})
+}
+
+// waitUser 呼叫等待使用者回應的回呼函數 fn 並等待其返回. 等待期間以 keepalive
+// 監看 SSH 連線, 連線中斷 (含無回應超過 replyTimeout) 時結束 fn 的 ctx, 並回傳
+// KindConnect 錯誤, 說明中斷於等待 what 期間. ctx 結束時回傳 KindCanceled 錯誤;
+// fn 回傳 *Error 以外的錯誤時, 以 canceledFormat (含一個 %s 代入主機) 回傳
+// KindCanceled 錯誤.
+func (c *Client) waitUser(ctx context.Context, replyTimeout time.Duration, what, canceledFormat string,
+	fn func(ctx context.Context) error) error {
 	cctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	go func() {
@@ -224,14 +236,13 @@ func (c *Client) confirmUpload(ctx context.Context, fn UploadConfirmFunc, req Up
 	}()
 	go c.keepalive(cctx, cancel, confirmKeepalive, replyTimeout)
 
-	err := fn(cctx, req)
+	err := fn(cctx)
 	var lost *connectionLost
 	switch {
 	case ctx.Err() != nil:
 		return newError(KindCanceled, ctx.Err(), "Connecting to %s was canceled", c.Host)
 	case errors.As(context.Cause(cctx), &lost):
-		return newError(KindConnect, lost.err,
-			"Lost the connection to %s while waiting for the confirmation to upload the remote program", c.Host)
+		return newError(KindConnect, lost.err, "Lost the connection to %s while waiting for %s", c.Host, what)
 	case err == nil:
 		return nil
 	}
@@ -239,7 +250,7 @@ func (c *Client) confirmUpload(ctx context.Context, fn UploadConfirmFunc, req Up
 	if errors.As(err, &e) {
 		return e
 	}
-	return newError(KindCanceled, err, "Uploading the remote program to %s was canceled", c.Host)
+	return newError(KindCanceled, err, canceledFormat, c.Host)
 }
 
 // keepalive 每隔 interval 送出一次 keepalive@openssh.com 請求, 直到 ctx 結束.
@@ -627,11 +638,16 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// Connect 依序進行 Dial, Deploy 與 Start, 即連線流程的步驟 1 至 4. 任一步驟
-// 失敗時關閉連線並回傳 *Error.
+// Connect 依序進行 Dial, 免密碼登入的詢問 (見 OfferKeySetup), Deploy 與 Start,
+// 即連線流程的步驟 1 至 4. 任一步驟失敗時關閉連線並回傳 *Error.
 func Connect(ctx context.Context, cfg Config, opts DeployOptions, intervalMs int) (*Client, *Deployment, *Process, error) {
 	c, err := Dial(ctx, cfg)
 	if err != nil {
+		return nil, nil, nil, err
+	}
+	opts = opts.withDefaults()
+	if err := c.OfferKeySetup(ctx, opts.CommandTimeout); err != nil {
+		c.Close()
 		return nil, nil, nil, err
 	}
 	dep, err := c.Deploy(ctx, opts)

@@ -19,7 +19,7 @@ import (
 
 // PasswordRequest 為要求登入密碼時提供給回呼函數的資訊.
 type PasswordRequest struct {
-	// User 與 Host 為要登入的帳號與主機; 經由跳板主機連線時, 可能是跳板主機.
+	// User 與 Host 為要登入的帳號與主機, Host 即 Config.Host.
 	User string
 	Host string
 	// Attempt 為本次連線中第幾次要求密碼, 由 1 起算; 大於 1 表示前一次的密碼
@@ -42,8 +42,8 @@ type PassphraseRequest struct {
 type PasswordFunc func(ctx context.Context, req PasswordRequest) ([]byte, error)
 
 // PassphraseFunc 回傳金鑰密碼. 回傳的位元組陣列交由本套件處置, 解密完成後立即
-// 以零覆寫. 回傳空陣列表示略過該金鑰; 回傳 ErrCanceled 或其他錯誤時, 連線隨即
-// 中止.
+// 以零覆寫. 回傳空陣列, ErrCanceled 或其他錯誤時略過該金鑰: 本套件回覆 SSH 函式庫
+// 該金鑰無法簽章, 其後的金鑰不再嘗試, 改以密碼登入. 唯 ctx 已結束時連線隨即中止.
 type PassphraseFunc func(ctx context.Context, req PassphraseRequest) ([]byte, error)
 
 // maxPasswordAttempts 與 maxPassphraseAttempts 與 OpenSSH 的
@@ -95,13 +95,74 @@ func zero(b []byte) {
 	clear(b)
 }
 
-// authSession 保存一次連線 (一個主機) 認證所需的狀態. 結束後須呼叫 wipe.
+// localKey 為一個存在且能取得公鑰的金鑰檔.
+type localKey struct {
+	path string
+	data []byte
+	pub  ssh.PublicKey
+	// signer 為沒有密碼保護的金鑰; 有密碼保護者為 nil, 簽章時才解密.
+	signer ssh.Signer
+}
+
+// loadKeyFiles 依序讀取 paths, 回傳存在且能取得公鑰的金鑰檔. 沒有密碼保護的金鑰
+// 直接解析; 有密碼保護者取金鑰檔內的公鑰, 舊式 PEM 格式沒有內含公鑰時取同名加
+// .pub 的檔案. 不存在, 無法解析或無法取得公鑰的檔案略過. 公鑰相同者只取第一個.
+func loadKeyFiles(paths []string) []localKey {
+	var out []localKey
+	seen := map[string]bool{}
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		k := localKey{path: path, data: data}
+		signer, err := ssh.ParsePrivateKey(data)
+		if err == nil {
+			k.signer, k.pub = signer, signer.PublicKey()
+		} else {
+			var missing *ssh.PassphraseMissingError
+			if !errors.As(err, &missing) {
+				continue
+			}
+			k.pub = missing.PublicKey
+			if k.pub == nil {
+				k.pub = readPublicKeyFile(path + ".pub")
+			}
+			if k.pub == nil {
+				continue
+			}
+		}
+		blob := string(k.pub.Marshal())
+		if seen[blob] {
+			continue
+		}
+		seen[blob] = true
+		out = append(out, k)
+	}
+	return out
+}
+
+// onlyFileKeys 回傳 agent 中公鑰與 files 之一相同的金鑰, 順序不變. 用於
+// ~/.ssh/config 把 IdentitiesOnly 設為 yes 的主機.
+func onlyFileKeys(agent []ssh.Signer, files []localKey) []ssh.Signer {
+	want := map[string]bool{}
+	for _, f := range files {
+		want[string(f.pub.Marshal())] = true
+	}
+	var out []ssh.Signer
+	for _, s := range agent {
+		if want[string(s.PublicKey().Marshal())] {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// authSession 保存一次連線認證所需的狀態. 結束後須呼叫 wipe.
 type authSession struct {
-	ctx        context.Context
-	user, host string
-	keyFiles   []string
-	// explicitKey 為真時, keyFiles 由使用者明確指定, 檔案不存在即為錯誤.
-	explicitKey bool
+	ctx         context.Context
+	user, host  string
+	files       []localKey
 	agentSigner []ssh.Signer
 	password    PasswordFunc
 	passphrase  PassphraseFunc
@@ -110,16 +171,12 @@ type authSession struct {
 
 	mu sync.Mutex
 	// buffers 為本套件為認證而建立的密碼副本, wipe 時以零覆寫.
-	buffers [][]byte
-	// pending 為無法事先取得公鑰的有密碼保護金鑰, 留待其他金鑰皆不被接受後才要求
-	// 金鑰密碼.
-	pending          []string
-	pendingTried     bool
+	buffers          [][]byte
 	passwordAttempts int
+	// signRequested 為遠端主機曾要求以有密碼保護的金鑰簽章.
+	signRequested bool
 	// abortErr 為回呼函數回傳的錯誤; 設定後所有認證方式立即失敗.
 	abortErr error
-	// configErr 為金鑰檔設定的錯誤, 例如明確指定的金鑰檔不存在.
-	configErr error
 }
 
 func (a *authSession) setAbort(err error) {
@@ -134,6 +191,20 @@ func (a *authSession) aborted() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.abortErr
+}
+
+// passwordUsed 回報本次認證是否曾要求登入密碼.
+func (a *authSession) passwordUsed() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.passwordAttempts > 0
+}
+
+// encryptedRequested 回報遠端主機是否曾要求以有密碼保護的金鑰簽章.
+func (a *authSession) encryptedRequested() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.signRequested
 }
 
 // wipe 以零覆寫本次認證建立的所有密碼副本.
@@ -152,49 +223,19 @@ func (a *authSession) wipe() {
 // testHookWiped 供測試確認密碼副本已被覆寫.
 var testHookWiped func([]byte)
 
-// methods 回傳依 OpenSSH 預設順序排列的認證方式: 公鑰 (ssh-agent 的金鑰在前,
-// 金鑰檔在後), keyboard-interactive, 密碼.
+// methods 回傳依規格排列的認證方式: 公鑰 (ssh-agent 的金鑰在前, 金鑰檔在後),
+// 密碼. 不支援 keyboard-interactive.
 func (a *authSession) methods() []ssh.AuthMethod {
 	m := []ssh.AuthMethod{ssh.PublicKeysCallback(a.signers)}
 	if a.password != nil {
-		m = append(m,
-			ssh.RetryableAuthMethod(ssh.KeyboardInteractive(a.keyboardInteractive), maxPasswordAttempts),
-			ssh.RetryableAuthMethod(ssh.PasswordCallback(a.passwordString), maxPasswordAttempts),
-		)
+		m = append(m, ssh.RetryableAuthMethod(ssh.PasswordCallback(a.passwordString), maxPasswordAttempts))
 	}
 	return m
 }
 
-// authCallback 於公鑰認證失敗後, 為無法事先取得公鑰的有密碼保護金鑰再進行一次
-// 公鑰認證, 使這類金鑰只在其他金鑰皆不被接受時才要求金鑰密碼.
-func (a *authSession) authCallback(ctx *ssh.ClientAuthContext) (ssh.AuthMethod, error) {
-	if err := a.aborted(); err != nil {
-		return nil, err
-	}
-	a.mu.Lock()
-	run := !a.pendingTried && len(a.pending) > 0 && contains(ctx.TriedMethods, "publickey") &&
-		contains(ctx.AllowedMethods, "publickey")
-	if run {
-		a.pendingTried = true
-	}
-	a.mu.Unlock()
-	if !run {
-		return nil, nil
-	}
-	return ssh.PublicKeysCallback(a.pendingSigners), nil
-}
-
-func contains(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
-	}
-	return false
-}
-
-// signers 回傳第一輪公鑰認證使用的金鑰: ssh-agent 的金鑰, 無密碼保護的金鑰,
-// 以及可事先取得公鑰的有密碼保護金鑰 (簽章時才要求金鑰密碼).
+// signers 回傳公鑰認證使用的金鑰: ssh-agent 的金鑰, 再依序為金鑰檔. 已在
+// ssh-agent 中的金鑰檔不重複列出. 有密碼保護的金鑰於遠端主機要求簽章時才要求
+// 金鑰密碼; KeyCache 已有其解密後的金鑰時直接沿用.
 func (a *authSession) signers() ([]ssh.Signer, error) {
 	if err := a.aborted(); err != nil {
 		return nil, err
@@ -204,96 +245,27 @@ func (a *authSession) signers() ([]ssh.Signer, error) {
 	for _, s := range a.agentSigner {
 		agentKeys[string(s.PublicKey().Marshal())] = true
 	}
-	for _, path := range a.keyFiles {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			if a.explicitKey {
-				a.mu.Lock()
-				a.configErr = newError(KindConfig, err, "Cannot read the key file %s", path)
-				a.mu.Unlock()
-				a.setAbort(a.configErr)
-				return nil, a.configErr
-			}
+	for _, k := range a.files {
+		if agentKeys[string(k.pub.Marshal())] {
 			continue
 		}
-		signer, err := ssh.ParsePrivateKey(data)
-		if err == nil {
-			if !agentKeys[string(signer.PublicKey().Marshal())] {
-				out = append(out, signer)
-			}
-			continue
-		}
-		var missing *ssh.PassphraseMissingError
-		if !errors.As(err, &missing) {
-			if a.explicitKey {
-				a.mu.Lock()
-				a.configErr = newError(KindConfig, err, "The key file %s is not a supported private key", path)
-				a.mu.Unlock()
-				a.setAbort(a.configErr)
-				return nil, a.configErr
-			}
-			continue
-		}
-		pub := missing.PublicKey
-		if pub == nil {
-			pub = readPublicKeyFile(path + ".pub")
-		}
-		if pub != nil && agentKeys[string(pub.Marshal())] {
-			// ssh-agent 已提供此金鑰, 不要求金鑰密碼.
-			continue
-		}
-		if pub == nil {
-			if cached := a.cache.get(cacheKey(path, nil)); cached != nil {
-				out = append(out, cached)
-				continue
-			}
-			a.mu.Lock()
-			a.pending = append(a.pending, path)
-			a.mu.Unlock()
-			continue
-		}
-		if cached := a.cache.get(cacheKey(path, pub)); cached != nil {
-			out = append(out, cached)
-			continue
-		}
-		out = append(out, &lazySigner{auth: a, path: path, data: data, pub: pub})
-	}
-	return out, nil
-}
-
-// pendingSigners 為無法事先取得公鑰的有密碼保護金鑰要求金鑰密碼並解密.
-func (a *authSession) pendingSigners() ([]ssh.Signer, error) {
-	var out []ssh.Signer
-	a.mu.Lock()
-	pending := append([]string(nil), a.pending...)
-	a.mu.Unlock()
-	for _, path := range pending {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		s, err := a.decrypt(path, data, nil)
-		if err != nil {
-			if a.aborted() != nil {
-				return nil, err
-			}
-			continue
-		}
-		if s != nil {
-			out = append(out, s)
+		switch {
+		case k.signer != nil:
+			out = append(out, k.signer)
+		case a.cache.get(cacheKey(k.path, k.pub)) != nil:
+			out = append(out, a.cache.get(cacheKey(k.path, k.pub)))
+		default:
+			out = append(out, &lazySigner{auth: a, path: k.path, data: k.data, pub: k.pub})
 		}
 	}
 	return out, nil
 }
 
-// cacheKey 為 KeyCache 的鍵. 無法事先取得公鑰的金鑰以 pub 為 nil 的鍵存放.
+// cacheKey 為 KeyCache 的鍵.
 func cacheKey(path string, pub ssh.PublicKey) string {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		abs = path
-	}
-	if pub == nil {
-		return abs + "\x00"
 	}
 	return abs + "\x00" + ssh.FingerprintSHA256(pub)
 }
@@ -310,12 +282,13 @@ func readPublicKeyFile(path string) ssh.PublicKey {
 	return pub
 }
 
-// errKeySkipped 表示使用者略過某個金鑰.
+// errKeySkipped 表示略過某個金鑰: 使用者取消, 留空送出, 或金鑰密碼連續錯誤.
 var errKeySkipped = errors.New("key skipped")
 
-// decrypt 要求金鑰密碼並解密金鑰, 至多嘗試 maxPassphraseAttempts 次. 金鑰密碼
-// 於每次解密後立即以零覆寫. 成功時把解密後的金鑰存入 KeyCache. 使用者略過時
-// 回傳 errKeySkipped.
+// decrypt 要求金鑰密碼並解密金鑰, 至多要求 maxPassphraseAttempts 次. 金鑰密碼
+// 於每次解密後立即以零覆寫. 成功時把解密後的金鑰存入 KeyCache. 使用者取消, 留空
+// 送出或第 maxPassphraseAttempts 次仍錯誤時回傳 errKeySkipped; ctx 已結束時另
+// 中止整個認證.
 func (a *authSession) decrypt(path string, data []byte, want ssh.PublicKey) (ssh.Signer, error) {
 	if a.passphrase == nil {
 		return nil, errKeySkipped
@@ -326,8 +299,11 @@ func (a *authSession) decrypt(path string, data []byte, want ssh.PublicKey) (ssh
 		a.clock.resume()
 		if err != nil {
 			zero(pass)
-			a.setAbort(err)
-			return nil, err
+			if a.ctx.Err() != nil {
+				a.setAbort(a.ctx.Err())
+				return nil, a.ctx.Err()
+			}
+			return nil, errKeySkipped
 		}
 		if len(pass) == 0 {
 			return nil, errKeySkipped
@@ -347,17 +323,13 @@ func (a *authSession) decrypt(path string, data []byte, want ssh.PublicKey) (ssh
 		if err != nil {
 			return nil, err
 		}
-		if want != nil && !bytes.Equal(signer.PublicKey().Marshal(), want.Marshal()) {
+		if !bytes.Equal(signer.PublicKey().Marshal(), want.Marshal()) {
 			return nil, fmt.Errorf("key file %s does not match its public key", path)
 		}
-		if want == nil {
-			a.cache.put(cacheKey(path, nil), signer)
-		} else {
-			a.cache.put(cacheKey(path, want), signer)
-		}
+		a.cache.put(cacheKey(path, want), signer)
 		return signer, nil
 	}
-	return nil, fmt.Errorf("incorrect passphrase for %s", path)
+	return nil, errKeySkipped
 }
 
 // isDecryptionFailure 判斷舊式 PEM 金鑰以錯誤的金鑰密碼解密時的錯誤. 此類金鑰以
@@ -369,7 +341,8 @@ func isDecryptionFailure(err error) bool {
 }
 
 // lazySigner 代表一個有密碼保護且已知公鑰的金鑰. 伺服器表示接受此公鑰後, 簽章時
-// 才要求金鑰密碼並解密, 與 OpenSSH 的行為相同.
+// 才要求金鑰密碼並解密, 與 OpenSSH 的行為相同. 無法解密時簽章失敗, SSH 函式庫隨即
+// 結束公鑰認證, 改以密碼登入.
 type lazySigner struct {
 	auth *authSession
 	path string
@@ -385,6 +358,9 @@ func (s *lazySigner) PublicKey() ssh.PublicKey { return s.pub }
 
 func (s *lazySigner) load() (ssh.AlgorithmSigner, error) {
 	s.once.Do(func() {
+		s.auth.mu.Lock()
+		s.auth.signRequested = true
+		s.auth.mu.Unlock()
 		s.signer, s.err = s.auth.decrypt(s.path, s.data, s.pub)
 	})
 	if s.err != nil {
@@ -461,23 +437,6 @@ func (a *authSession) obtainPassword() (string, error) {
 
 func (a *authSession) passwordString() (string, error) {
 	return a.obtainPassword()
-}
-
-// keyboardInteractive 以登入密碼回答 keyboard-interactive 認證的單一不回顯問題,
-// 與 OpenSSH 以密碼回答此類提示的行為相同. 沒有問題的提示直接回覆空答案; 其他
-// 形式的提示 (多個問題, 回顯的問題) 無法回答, 該認證方式失敗.
-func (a *authSession) keyboardInteractive(name, instruction string, questions []string, echos []bool) ([]string, error) {
-	if len(questions) == 0 {
-		return nil, nil
-	}
-	if len(questions) != 1 || echos[0] {
-		return nil, errors.New("unsupported keyboard-interactive prompt")
-	}
-	pw, err := a.obtainPassword()
-	if err != nil {
-		return nil, err
-	}
-	return []string{pw}, nil
 }
 
 // agentSigners 取得 ssh-agent 提供的金鑰. 無法連上 ssh-agent 時回傳 nil.

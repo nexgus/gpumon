@@ -134,6 +134,9 @@ func TestHostLifecycleAndOrder(t *testing.T) {
 	s.SetProcsCollapsed("u@c", true)
 	s.SetMaximaCollapsed("u@b", true)
 	s.SetMaximaCollapsed("u@c", true)
+	s.SetNoKeySetupPrompt("u@b")
+	s.SetNoKeySetupPrompt("u@c")
+	s.SetNoKeySetupPrompt("u@d")
 	if err := s.UpdateHost("u@b", HostConn{Addr: "bb", User: "v", Port: 22}); err != nil {
 		t.Fatal(err)
 	}
@@ -153,6 +156,16 @@ func TestHostLifecycleAndOrder(t *testing.T) {
 	if !s.GPUCollapsed("v@bb", 3) || s.GPUCollapsed("u@b", 3) {
 		t.Errorf("collapse state not migrated on rename")
 	}
+	// 免密碼登入的不再詢問不轉移而清除; 識別不變的編輯保留.
+	if s.NoKeySetupPrompt("v@bb") || s.NoKeySetupPrompt("u@b") || !s.NoKeySetupPrompt("u@c") {
+		t.Errorf("no key setup prompt on rename: %v", s.Snapshot().NoKeySetupPrompt)
+	}
+	if err := s.UpdateHost("u@d", HostConn{Addr: "d", User: "u", Port: 2222}); err != nil {
+		t.Fatal(err)
+	}
+	if !s.NoKeySetupPrompt("u@d") {
+		t.Errorf("no key setup prompt dropped by an edit keeping the identity")
+	}
 	if err := s.UpdateHost("v@bb", HostConn{Addr: "c", User: "u"}); !errors.Is(err, ErrDuplicateHost) {
 		t.Errorf("edit to duplicate: %v", err)
 	}
@@ -168,7 +181,11 @@ func TestHostLifecycleAndOrder(t *testing.T) {
 	if err := s.RemoveHost("u@a"); !errors.Is(err, ErrHostNotFound) {
 		t.Errorf("remove missing: %v", err)
 	}
+	s.SetNoKeySetupPrompt("v@bb")
 	s.RemoveHost("v@bb")
+	if s.NoKeySetupPrompt("v@bb") || !s.NoKeySetupPrompt("u@c") {
+		t.Errorf("no key setup prompt not removed with host: %v", s.Snapshot().NoKeySetupPrompt)
+	}
 	if len(s.Snapshot().CollapsedGPUs) != 0 || s.ProcsCollapsed("v@bb") || !s.ProcsCollapsed("u@c") ||
 		s.MaximaCollapsed("v@bb") || !s.MaximaCollapsed("u@c") {
 		t.Errorf("collapse state not removed with host")
@@ -316,7 +333,8 @@ func TestLoadOutOfRangeAndInvalid(t *testing.T) {
 	  ],
 	  "collapsed_gpus": {"u@a": [2, 1, 2, -4], "u@b": [], "x": [-1]},
 	  "collapsed_procs": ["u@a", "", "u@b", "u@a"],
-	  "collapsed_maxima": ["u@b", "", "u@b", "u@a"]
+	  "collapsed_maxima": ["u@b", "", "u@b", "u@a"],
+	  "no_key_setup_prompt": ["u@a", "", "u@a", "u@b"]
 	}`)
 	s := mustOpen(t, dir)
 	d := s.Snapshot()
@@ -347,6 +365,9 @@ func TestLoadOutOfRangeAndInvalid(t *testing.T) {
 	}
 	if !reflect.DeepEqual(d.CollapsedProcs, []string{"u@a", "u@b"}) {
 		t.Errorf("collapsed procs = %v", d.CollapsedProcs)
+	}
+	if !reflect.DeepEqual(d.NoKeySetupPrompt, []string{"u@a", "u@b"}) {
+		t.Errorf("no key setup prompt = %v", d.NoKeySetupPrompt)
 	}
 	if !reflect.DeepEqual(d.CollapsedMaxima, []string{"u@b", "u@a"}) {
 		t.Errorf("collapsed maxima = %v", d.CollapsedMaxima)

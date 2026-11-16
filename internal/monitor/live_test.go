@@ -18,8 +18,9 @@ import (
 )
 
 // TestLive 於實際的測試主機端到端驗證連線管理. 只在設定環境變數
-// GPUMON_LIVE_HOST=<user>@<host> 時執行. 使用本機的 ~/.ssh/config (唯讀) 與
-// ssh-agent, known_hosts 指向暫存目錄內的複本, 設定與記錄檔寫入暫存目錄.
+// GPUMON_LIVE_HOST=<user>@<host> 時執行. 使用本機的 ~/.ssh/config, OpenSSH 的
+// known_hosts (皆唯讀) 與 ssh-agent, 程式自己的 known_hosts 指向暫存目錄內的
+// 複本, 設定與記錄檔寫入暫存目錄.
 // 結束時刪除遠端的 ~/.gpumon/.
 func TestLive(t *testing.T) {
 	target := os.Getenv("GPUMON_LIVE_HOST")

@@ -20,8 +20,9 @@ import (
 )
 
 // TestLive 於實際的測試主機驗證部署流程. 只在設定環境變數
-// GPUMON_LIVE_HOST=<user>@<host> 時執行; 使用本機的 ~/.ssh/config (唯讀) 與
-// ssh-agent, known_hosts 指向暫存目錄內的複本. 結束時刪除遠端的 ~/.gpumon/.
+// GPUMON_LIVE_HOST=<user>@<host> 時執行; 使用本機的 ~/.ssh/config, OpenSSH 的
+// known_hosts (皆唯讀) 與 ssh-agent, 程式自己的 known_hosts 指向暫存目錄內的
+// 複本. 結束時刪除遠端的 ~/.gpumon/.
 func TestLive(t *testing.T) {
 	target := os.Getenv("GPUMON_LIVE_HOST")
 	if target == "" {
@@ -198,17 +199,22 @@ func TestLive(t *testing.T) {
 		t.Error("expected KindExec")
 	}
 
-	// accept-new: 空的 known_hosts 自動寫入.
+	// 兩份 known_hosts 皆無記錄時詢問, 同意後寫入程式自己的 known_hosts.
 	empty := filepath.Join(tmp, "empty_known_hosts")
 	cfgNew := cfg
 	cfgNew.KnownHostsPath = empty
+	cfgNew.OpenSSHKnownHostsPath = filepath.Join(tmp, "no_openssh_known_hosts")
+	cfgNew.HostKey = func(_ context.Context, req HostKeyRequest) error {
+		t.Logf("host key prompt: %+v", req)
+		return nil
+	}
 	c3, err := Dial(ctx, cfgNew)
 	if err != nil {
 		t.Fatal(err)
 	}
 	c3.Close()
 	data, _ := os.ReadFile(empty)
-	t.Logf("accept-new wrote: %.80s", data)
+	t.Logf("accepted host key written: %.80s", data)
 
 	// 不使用 ssh-agent, 只以金鑰檔登入.
 	cfgNoAgent := cfg

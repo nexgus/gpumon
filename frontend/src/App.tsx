@@ -4,6 +4,8 @@ import { Sidebar } from "./components/Sidebar";
 import { DeleteHostDialog } from "./dialogs/DeleteHostDialog";
 import { ConnectErrorDialog, OperationErrorDialog } from "./dialogs/ErrorDialogs";
 import { HostForm } from "./dialogs/HostForm";
+import { HostKeyDialog } from "./dialogs/HostKeyDialog";
+import { KeyResultDialog, KeySetupDialog } from "./dialogs/KeySetupDialogs";
 import { PromptDialog } from "./dialogs/PromptDialog";
 import { QuitDialog } from "./dialogs/QuitDialog";
 import { UploadDialog } from "./dialogs/UploadDialog";
@@ -34,6 +36,9 @@ export default function App() {
       {form && <HostForm host={form.host} onClose={() => setForm(null)} />}
       {deleting && <DeleteHostDialog host={deleting} onClose={() => setDeleting(null)} />}
       <PromptDialog />
+      <HostKeyDialog />
+      <KeySetupDialog />
+      <KeyResultDialog />
       <UploadDialog />
       <ConnectErrorDialog />
       <OperationErrorDialog />

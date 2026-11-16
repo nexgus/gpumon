@@ -9,13 +9,11 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
-	"errors"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -153,6 +151,11 @@ func TestMissingUser(t *testing.T) {
 	cfg.User = ""
 	_, err := Dial(context.Background(), cfg)
 	expectKind(t, err, KindConfig)
+
+	cfg = env.cfg(srv)
+	cfg.KnownHostsPath = ""
+	_, err = Dial(context.Background(), cfg)
+	expectKind(t, err, KindConfig)
 }
 
 func TestDefaultKeySearch(t *testing.T) {
@@ -188,9 +191,100 @@ func TestExplicitKeyFile(t *testing.T) {
 	}
 	c.Close()
 
+	// 主機表單指定的金鑰檔不存在時略過, 不視為錯誤; 沒有其他登入方式即認證失敗.
 	cfg.KeyFile = filepath.Join(env.home, "keys", "missing")
 	_, err = Dial(context.Background(), cfg)
-	expectKind(t, err, KindConfig)
+	expectKind(t, err, KindAuth)
+
+	// 主機表單的金鑰檔不存在時, 仍取用 ~/.ssh/config 的 IdentityFile.
+	writeFile(t, env.config, "Host *\n  IdentityFile ~/keys/mykey\n", 0o600)
+	c, err = Dial(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+}
+
+func TestKeyFileOrder(t *testing.T) {
+	srv := newTestServer(t)
+	srv.setPassword("pw")
+	env := newTestEnv(t)
+	form := genKey(t, filepath.Join(env.home, "keys", "form"), "", false)
+	cfg1 := genKey(t, filepath.Join(env.home, "keys", "cfg1"), "", false)
+	cfg2 := genKey(t, filepath.Join(env.home, "keys", "cfg2"), "", false)
+	// 預設私鑰只在兩者皆無時列出.
+	genKey(t, filepath.Join(env.sshDir, "id_ed25519"), "", false)
+	agentKey := genKey(t, filepath.Join(env.home, "agentkey"), "", false)
+	keyring := agent.NewKeyring()
+	keyring.Add(agent.AddedKey{PrivateKey: agentKey})
+	// 已在 ssh-agent 中的金鑰檔不重複嘗試.
+	keyring.Add(agent.AddedKey{PrivateKey: cfg2})
+	writeFile(t, env.config, "Host *\n  IdentityFile ~/keys/cfg1\n  IdentityFile ~/keys/missing\n  IdentityFile ~/keys/cfg2\n", 0o600)
+	cfg := env.cfg(srv)
+	cfg.KeyFile = filepath.Join(env.home, "keys", "form")
+	cfg.Agent = func(context.Context) (net.Conn, error) {
+		a, b := net.Pipe()
+		go agent.ServeAgent(keyring, b)
+		return a, nil
+	}
+	cfg.Password = func(context.Context, PasswordRequest) ([]byte, error) { return []byte("pw"), nil }
+	c, err := Dial(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+	fp := func(k ed25519.PrivateKey) string { return ssh.FingerprintSHA256(pubOf(t, k)) }
+	want := []string{fp(agentKey), fp(cfg2), fp(form), fp(cfg1)}
+	if got := srv.offeredKeys(); !reflect.DeepEqual(got, want) {
+		t.Errorf("offered keys = %v, want %v", got, want)
+	}
+}
+
+func TestIdentitiesOnly(t *testing.T) {
+	srv := newTestServer(t)
+	srv.setPassword("pw")
+	env := newTestEnv(t)
+	agentKey := genKey(t, filepath.Join(env.home, "agentkey"), "", false)
+	fileKey := genKey(t, filepath.Join(env.home, "keys", "file"), "", false)
+	srv.authorize(pubOf(t, agentKey))
+	keyring := agent.NewKeyring()
+	keyring.Add(agent.AddedKey{PrivateKey: agentKey})
+	keyring.Add(agent.AddedKey{PrivateKey: fileKey})
+	writeFile(t, env.config, "Host *\n  IdentitiesOnly yes\n  IdentityFile ~/keys/file\n", 0o600)
+	cfg := env.cfg(srv)
+	cfg.Agent = func(context.Context) (net.Conn, error) {
+		a, b := net.Pipe()
+		go agent.ServeAgent(keyring, b)
+		return a, nil
+	}
+	asked := 0
+	cfg.Password = func(context.Context, PasswordRequest) ([]byte, error) {
+		asked++
+		return []byte("pw"), nil
+	}
+	c, err := Dial(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+	if asked != 1 {
+		t.Errorf("password asked %d times; the agent key not in the key files must be excluded", asked)
+	}
+	if got := srv.offeredKeys(); len(got) != 1 || got[0] != ssh.FingerprintSHA256(pubOf(t, fileKey)) {
+		t.Errorf("offered keys = %v", got)
+	}
+
+	// IdentitiesOnly 未設定時, ssh-agent 的金鑰皆可使用.
+	writeFile(t, env.config, "Host *\n  IdentityFile ~/keys/file\n", 0o600)
+	asked = 0
+	c, err = Dial(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+	if asked != 0 {
+		t.Errorf("password asked %d times", asked)
+	}
 }
 
 func TestConfigIdentityFile(t *testing.T) {
@@ -314,10 +408,8 @@ func TestEncryptedKeyProvidedByAgent(t *testing.T) {
 	c.Close()
 }
 
-func TestLegacyEncryptedKeyWithoutPublicKey(t *testing.T) {
-	srv := newTestServer(t)
+func TestLegacyEncryptedKey(t *testing.T) {
 	env := newTestEnv(t)
-	agentKey := genKey(t, filepath.Join(env.home, "agentkey"), "", false)
 	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -328,40 +420,36 @@ func TestLegacyEncryptedKeyWithoutPublicKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(env.sshDir, "id_rsa"), string(pem.EncodeToMemory(block)), 0o600)
+	keyPath := filepath.Join(env.sshDir, "id_rsa")
+	writeFile(t, keyPath, string(pem.EncodeToMemory(block)), 0o600)
 
-	keyring := agent.NewKeyring()
-	keyring.Add(agent.AddedKey{PrivateKey: agentKey})
-	agentDial := func(context.Context) (net.Conn, error) {
-		a, b := net.Pipe()
-		go agent.ServeAgent(keyring, b)
-		return a, nil
-	}
-
-	// ssh-agent 的金鑰被接受時, 無法事先取得公鑰的金鑰不要求金鑰密碼.
-	srv.authorize(pubOf(t, agentKey))
+	// 沒有 .pub 檔時無法取得公鑰, 該金鑰檔略過, 不要求金鑰密碼.
+	srv := newTestServer(t)
+	srv.setPassword("pw")
+	srv.authorize(pubOf(t, rsaKey))
 	cfg := env.cfg(srv)
-	cfg.Agent = agentDial
 	cfg.Passphrase = func(ctx context.Context, req PassphraseRequest) ([]byte, error) {
-		t.Error("passphrase requested although another key was accepted")
+		t.Error("passphrase requested for a key without a public key")
 		return nil, ErrCanceled
 	}
+	cfg.Password = func(context.Context, PasswordRequest) ([]byte, error) { return []byte("pw"), nil }
 	c, err := Dial(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	c.Close()
+	if len(srv.offeredKeys()) != 0 {
+		t.Errorf("offered keys = %v", srv.offeredKeys())
+	}
 
-	// 只有該金鑰被接受時, 其他金鑰皆失敗後才要求金鑰密碼.
-	srv2 := newTestServer(t)
-	srv2.authorize(pubOf(t, rsaKey))
-	cfg = env.cfg(srv2)
-	cfg.Agent = agentDial
+	// 有 .pub 檔時取其公鑰, 遠端主機要求簽章時才要求金鑰密碼.
+	writeFile(t, keyPath+".pub", string(ssh.MarshalAuthorizedKey(pubOf(t, rsaKey))), 0o644)
 	asked := 0
 	cfg.Passphrase = func(ctx context.Context, req PassphraseRequest) ([]byte, error) {
 		asked++
 		return []byte("legacy"), nil
 	}
+	cfg.Password = nil
 	c, err = Dial(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -372,54 +460,210 @@ func TestLegacyEncryptedKeyWithoutPublicKey(t *testing.T) {
 	}
 }
 
-func TestHostKeyAcceptNew(t *testing.T) {
+func TestPassphraseSkipFallsBackToPassword(t *testing.T) {
+	cases := []struct {
+		name  string
+		reply func(attempt int) ([]byte, error)
+		want  int
+	}{
+		{"canceled", func(int) ([]byte, error) { return nil, ErrCanceled }, 1},
+		{"empty", func(int) ([]byte, error) { return []byte{}, nil }, 1},
+		{"three wrong", func(int) ([]byte, error) { return []byte("wrong"), nil }, maxPassphraseAttempts},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newTestServer(t)
+			srv.setPassword("pw")
+			env := newTestEnv(t)
+			first := genKey(t, filepath.Join(env.home, "keys", "first"), "secret", false)
+			second := genKey(t, filepath.Join(env.home, "keys", "second"), "", false)
+			srv.authorize(pubOf(t, first))
+			srv.authorize(pubOf(t, second))
+			writeFile(t, env.config, "Host *\n  IdentityFile ~/keys/first\n  IdentityFile ~/keys/second\n", 0o600)
+			cfg := env.cfg(srv)
+			asked := 0
+			cfg.Passphrase = func(ctx context.Context, req PassphraseRequest) ([]byte, error) {
+				asked++
+				return tc.reply(req.Attempt)
+			}
+			passwords := 0
+			cfg.Password = func(context.Context, PasswordRequest) ([]byte, error) {
+				passwords++
+				return []byte("pw"), nil
+			}
+			c, err := Dial(context.Background(), cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			c.Close()
+			if asked != tc.want {
+				t.Errorf("passphrase asked %d times, want %d", asked, tc.want)
+			}
+			// 其後的金鑰不再嘗試, 改以密碼登入.
+			if passwords != 1 {
+				t.Errorf("password asked %d times", passwords)
+			}
+			if !c.login.encryptedRequested || c.login.eligible() {
+				t.Errorf("login = %+v; passwordless login must not be offered", c.login)
+			}
+		})
+	}
+}
+
+func TestHostKeyUnknown(t *testing.T) {
 	srv := newTestServer(t)
 	srv.setPassword("pw")
 	env := newTestEnv(t)
 	_, otherKey, _ := ed25519.GenerateKey(rand.Reader)
 	// 刻意不以換行結尾, 確認附加時補上換行.
-	writeFile(t, env.knownHosts, knownhosts.Line([]string{"other.example.com"}, pubOf(t, otherKey)), 0o600)
+	writeFile(t, env.ownKnownHosts, knownhosts.Line([]string{"other.example.com"}, pubOf(t, otherKey)), 0o600)
 	cfg := env.cfg(srv)
 	cfg.Password = func(context.Context, PasswordRequest) ([]byte, error) { return []byte("pw"), nil }
+	var reqs []HostKeyRequest
+	cfg.HostKey = func(ctx context.Context, req HostKeyRequest) error {
+		reqs = append(reqs, req)
+		return ErrCanceled
+	}
 
+	// 不同意時中止連線, 不寫入.
+	_, err := Dial(context.Background(), cfg)
+	expectKind(t, err, KindCanceled)
+	wantFP := ssh.FingerprintSHA256(srv.hostSigner.PublicKey())
+	if len(reqs) != 1 || reqs[0].Changed || len(reqs[0].Old) != 0 ||
+		reqs[0].Key != (HostKeyFingerprint{Type: ssh.KeyAlgoED25519, Fingerprint: wantFP}) ||
+		reqs[0].Host != srv.host || reqs[0].Address != srv.addr {
+		t.Fatalf("requests = %+v", reqs)
+	}
+	before, _ := os.ReadFile(env.ownKnownHosts)
+
+	// 自動重新連線不詢問.
+	cfg.HostKey = nil
+	_, err = Dial(context.Background(), cfg)
+	expectKind(t, err, KindHostKey)
+	if !strings.Contains(err.Error(), "needs your confirmation") || !strings.Contains(err.Error(), wantFP) {
+		t.Errorf("error = %v", err)
+	}
+
+	// 同意時寫入程式自己的 known_hosts, OpenSSH 的 known_hosts 不建立.
+	cfg.HostKey = func(context.Context, HostKeyRequest) error { return nil }
 	c, err := Dial(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	c.Close()
-	data, _ := os.ReadFile(env.knownHosts)
+	data, _ := os.ReadFile(env.ownKnownHosts)
+	if !strings.HasPrefix(string(data), string(before)+"\n") {
+		t.Fatalf("existing content changed:\n%s", data)
+	}
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	wantPrefix := "[127.0.0.1]:" + srv.port + " ssh-ed25519 "
-	if len(lines) != 2 || !strings.HasPrefix(lines[1], wantPrefix) {
-		t.Fatalf("known_hosts after first connect:\n%s", data)
+	if len(lines) != 2 || !strings.HasPrefix(lines[1], "[127.0.0.1]:"+srv.port+" ssh-ed25519 ") {
+		t.Fatalf("known_hosts after accepting:\n%s", data)
+	}
+	if _, err := os.Stat(env.knownHosts); !os.IsNotExist(err) {
+		t.Error("the OpenSSH known_hosts was created")
 	}
 
-	// 已收錄且相符.
+	// 已記錄且相同時不詢問.
+	cfg.HostKey = nil
 	c, err = Dial(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	c.Close()
-	data2, _ := os.ReadFile(env.knownHosts)
-	if string(data2) != string(data) {
-		t.Errorf("known_hosts changed on second connect:\n%s", data2)
+}
+
+func TestHostKeyFromOpenSSHFile(t *testing.T) {
+	srv := newTestServer(t)
+	srv.setPassword("pw")
+	env := newTestEnv(t)
+	writeFile(t, env.knownHosts, knownhosts.Line([]string{srv.addr}, srv.hostSigner.PublicKey())+"\n", 0o600)
+	cfg := env.cfg(srv)
+	cfg.Password = func(context.Context, PasswordRequest) ([]byte, error) { return []byte("pw"), nil }
+	cfg.HostKey = nil
+	c, err := Dial(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+	if data, _ := os.ReadFile(env.ownKnownHosts); len(data) != 0 {
+		t.Errorf("own known_hosts written:\n%s", data)
+	}
+}
+
+func TestHostKeyChanged(t *testing.T) {
+	srv := newTestServer(t)
+	srv.setPassword("pw")
+	env := newTestEnv(t)
+	_, old1, _ := ed25519.GenerateKey(rand.Reader)
+	_, old2, _ := ed25519.GenerateKey(rand.Reader)
+	_, other, _ := ed25519.GenerateKey(rand.Reader)
+	ownBefore := knownhosts.Line([]string{srv.addr}, pubOf(t, old1)) + "\n" +
+		knownhosts.Line([]string{"other.example.com"}, pubOf(t, other)) + "\n"
+	writeFile(t, env.ownKnownHosts, ownBefore, 0o600)
+	opensshBefore := knownhosts.Line([]string{srv.addr}, pubOf(t, old2)) + "\n"
+	writeFile(t, env.knownHosts, opensshBefore, 0o600)
+	cfg := env.cfg(srv)
+	cfg.Password = func(context.Context, PasswordRequest) ([]byte, error) { return []byte("pw"), nil }
+
+	cfg.HostKey = nil
+	_, err := Dial(context.Background(), cfg)
+	expectKind(t, err, KindHostKey)
+	if !strings.Contains(err.Error(), "has changed") {
+		t.Errorf("error = %v", err)
 	}
 
-	// 已收錄但不符.
-	_, priv, _ := ed25519.GenerateKey(rand.Reader)
-	signer, _ := ssh.NewSignerFromKey(priv)
-	srv.setHostKey(signer)
-	_, err = Dial(context.Background(), cfg)
-	expectKind(t, err, KindHostKey)
-	var e *Error
-	errors.As(err, &e)
-	if !strings.Contains(e.Message, "does not match") {
-		t.Errorf("message = %q", e.Message)
+	var reqs []HostKeyRequest
+	cfg.HostKey = func(ctx context.Context, req HostKeyRequest) error {
+		reqs = append(reqs, req)
+		return nil
 	}
-	data3, _ := os.ReadFile(env.knownHosts)
-	if string(data3) != string(data) {
-		t.Errorf("known_hosts changed after mismatch:\n%s", data3)
+	c, err := Dial(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
 	}
+	c.Close()
+	wantOld := []HostKeyFingerprint{
+		{ssh.KeyAlgoED25519, ssh.FingerprintSHA256(pubOf(t, old1))},
+		{ssh.KeyAlgoED25519, ssh.FingerprintSHA256(pubOf(t, old2))},
+	}
+	if len(reqs) != 1 || !reqs[0].Changed || !reflect.DeepEqual(reqs[0].Old, wantOld) {
+		t.Fatalf("requests = %+v", reqs)
+	}
+	want := knownhosts.Line([]string{"other.example.com"}, pubOf(t, other)) + "\n" +
+		knownhosts.Line([]string{srv.addr}, srv.hostSigner.PublicKey()) + "\n"
+	if data, _ := os.ReadFile(env.ownKnownHosts); string(data) != want {
+		t.Errorf("own known_hosts:\n%s\nwant:\n%s", data, want)
+	}
+	if st, _ := os.Stat(env.ownKnownHosts); st.Mode().Perm() != 0o600 {
+		t.Errorf("own known_hosts mode = %v", st.Mode())
+	}
+	if data, _ := os.ReadFile(env.knownHosts); string(data) != opensshBefore {
+		t.Errorf("the OpenSSH known_hosts changed:\n%s", data)
+	}
+
+	// OpenSSH 的檔案仍為舊金鑰, 程式自己的檔案相同即通過, 不再詢問.
+	cfg.HostKey = nil
+	c, err = Dial(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+}
+
+func TestHostKeyWriteFailureStillConnects(t *testing.T) {
+	srv := newTestServer(t)
+	srv.setPassword("pw")
+	env := newTestEnv(t)
+	cfg := env.cfg(srv)
+	// 程式自己的 known_hosts 所在位置為一般檔案, 無法建立目錄與寫入.
+	writeFile(t, filepath.Join(env.home, "blocker"), "", 0o600)
+	cfg.KnownHostsPath = filepath.Join(env.home, "blocker", "known_hosts")
+	cfg.Password = func(context.Context, PasswordRequest) ([]byte, error) { return []byte("pw"), nil }
+	c, err := Dial(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
 }
 
 func TestHostKeyFileCreated(t *testing.T) {
@@ -427,17 +671,38 @@ func TestHostKeyFileCreated(t *testing.T) {
 	srv.setPassword("pw")
 	env := newTestEnv(t)
 	cfg := env.cfg(srv)
-	cfg.KnownHostsPath = filepath.Join(env.home, "new", "known_hosts")
+	cfg.Password = func(context.Context, PasswordRequest) ([]byte, error) { return []byte("pw"), nil }
+	cfg.HostKey = func(context.Context, HostKeyRequest) error {
+		st, err := os.Stat(cfg.KnownHostsPath)
+		if err != nil || st.Mode().Perm() != 0o600 || st.Size() != 0 {
+			t.Errorf("known_hosts not created empty with 0600: %v %v", st, err)
+		}
+		return ErrCanceled
+	}
+	_, err := Dial(context.Background(), cfg)
+	expectKind(t, err, KindCanceled)
+	st, err := os.Stat(filepath.Dir(cfg.KnownHostsPath))
+	if err != nil || st.Mode().Perm() != 0o700 {
+		t.Errorf("directory not created with 0700: %v %v", st, err)
+	}
+}
+
+func TestTimeoutPausedDuringHostKeyPrompt(t *testing.T) {
+	srv := newTestServer(t)
+	srv.setPassword("pw")
+	env := newTestEnv(t)
+	cfg := env.cfg(srv)
+	cfg.ConnectTimeout = 300 * time.Millisecond
+	cfg.HostKey = func(context.Context, HostKeyRequest) error {
+		time.Sleep(800 * time.Millisecond)
+		return nil
+	}
 	cfg.Password = func(context.Context, PasswordRequest) ([]byte, error) { return []byte("pw"), nil }
 	c, err := Dial(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	c.Close()
-	st, err := os.Stat(cfg.KnownHostsPath)
-	if err != nil || st.Mode().Perm() != 0o600 {
-		t.Fatalf("known_hosts not created with 0600: %v %v", st, err)
-	}
 }
 
 func TestConnectTimeout(t *testing.T) {
@@ -462,7 +727,7 @@ func TestConnectRefused(t *testing.T) {
 	addr := ln.Addr().(*net.TCPAddr)
 	ln.Close()
 	env := newTestEnv(t)
-	cfg := Config{Host: "127.0.0.1", Port: addr.Port, User: "u", HomeDir: env.home, Agent: NoAgent}
+	cfg := Config{Host: "127.0.0.1", Port: addr.Port, User: "u", HomeDir: env.home, KnownHostsPath: env.ownKnownHosts, Agent: NoAgent}
 	_, err := Dial(context.Background(), cfg)
 	expectKind(t, err, KindConnect)
 }
@@ -492,68 +757,4 @@ func TestContextCanceled(t *testing.T) {
 	time.AfterFunc(100*time.Millisecond, cancel)
 	_, err := Dial(ctx, env.cfg(srv))
 	expectKind(t, err, KindCanceled)
-}
-
-func TestProxyJump(t *testing.T) {
-	jump := newTestServer(t)
-	jump.setPassword("jumppw")
-	target := newTestServer(t)
-	env := newTestEnv(t)
-	priv := genKey(t, filepath.Join(env.sshDir, "id_ed25519"), "", false)
-	target.authorize(pubOf(t, priv))
-	writeFile(t, env.config, "Host target\n  HostName 127.0.0.1\n  Port "+target.port+
-		"\n  User tuser\n  ProxyJump juser@127.0.0.1:"+jump.port+"\n", 0o600)
-	cfg := env.cfg(target)
-	cfg.Host, cfg.Port, cfg.User = "target", 0, ""
-	var mu sync.Mutex
-	var prompts []PasswordRequest
-	cfg.Password = func(ctx context.Context, req PasswordRequest) ([]byte, error) {
-		mu.Lock()
-		prompts = append(prompts, req)
-		mu.Unlock()
-		return []byte("jumppw"), nil
-	}
-	c, err := Dial(context.Background(), cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	out, code, err := c.run(context.Background(), "echo hi", time.Second)
-	if err != nil || code != 0 || string(out) != "hi\n" {
-		t.Errorf("run through jump: %q %d %v", out, code, err)
-	}
-	c.Close()
-	if len(prompts) != 1 || prompts[0].User != "juser" || prompts[0].Host != "127.0.0.1" {
-		t.Errorf("prompts = %+v", prompts)
-	}
-	data, _ := os.ReadFile(env.knownHosts)
-	if strings.Count(string(data), "\n") != 2 {
-		t.Errorf("known_hosts should contain the jump host and the target:\n%s", data)
-	}
-}
-
-func TestProxyCommand(t *testing.T) {
-	if _, err := exec.LookPath("nc"); err != nil {
-		t.Skip("nc not available")
-	}
-	target := newTestServer(t)
-	target.setPassword("pw")
-	env := newTestEnv(t)
-	writeFile(t, env.config, "Host viacmd\n  HostName 127.0.0.1\n  Port "+target.port+
-		"\n  ProxyCommand nc %h %p\n", 0o600)
-	cfg := env.cfg(target)
-	cfg.Host, cfg.Port = "viacmd", 0
-	cfg.Password = func(context.Context, PasswordRequest) ([]byte, error) { return []byte("pw"), nil }
-	c, err := Dial(context.Background(), cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	out, _, err := c.run(context.Background(), "echo ok", time.Second)
-	if err != nil || string(out) != "ok\n" {
-		t.Errorf("run through proxy command: %q %v", out, err)
-	}
-	c.Close()
-
-	writeFile(t, env.config, "Host viacmd\n  ProxyCommand false\n", 0o600)
-	_, err = Dial(context.Background(), cfg)
-	expectKind(t, err, KindConnect)
 }

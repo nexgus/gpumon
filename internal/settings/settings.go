@@ -274,6 +274,9 @@ type Data struct {
 
 	// ProcFilters 以主機識別字串為鍵, 值為程序卡片的過濾條件; 沒有任何條件時不存放.
 	ProcFilters map[string]ProcFilter `json:"proc_filters"`
+
+	// NoKeySetupPrompt 為記為不再詢問免密碼登入的主機識別字串, 不含空字串與重複.
+	NoKeySetupPrompt []string `json:"no_key_setup_prompt"`
 }
 
 // Default 回傳預設設定.
@@ -293,6 +296,8 @@ func Default() Data {
 		CollapsedMaxima: []string{},
 		ProcSorts:       map[string]ProcSort{},
 		ProcFilters:     map[string]ProcFilter{},
+
+		NoKeySetupPrompt: []string{},
 	}
 }
 
@@ -306,6 +311,7 @@ func (d Data) clone() Data {
 	}
 	c.CollapsedProcs = append([]string{}, d.CollapsedProcs...)
 	c.CollapsedMaxima = append([]string{}, d.CollapsedMaxima...)
+	c.NoKeySetupPrompt = append([]string{}, d.NoKeySetupPrompt...)
 	c.ProcSorts = make(map[string]ProcSort, len(d.ProcSorts))
 	for k, v := range d.ProcSorts {
 		c.ProcSorts[k] = v
@@ -415,6 +421,16 @@ func (d *Data) sanitize() {
 		}
 	}
 	d.CollapsedMaxima = maxima
+
+	noPrompt := []string{}
+	seenNoPrompt := map[string]bool{}
+	for _, id := range d.NoKeySetupPrompt {
+		if id != "" && !seenNoPrompt[id] {
+			seenNoPrompt[id] = true
+			noPrompt = append(noPrompt, id)
+		}
+	}
+	d.NoKeySetupPrompt = noPrompt
 
 	// 排序方式的欄位或方向不合法時分別改用預設值, 結果為預設排序方式者不存放.
 	sorts := map[string]ProcSort{}

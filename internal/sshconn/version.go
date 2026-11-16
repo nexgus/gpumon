@@ -25,9 +25,10 @@ type ProgramVersion struct {
 var programVersionRE = regexp.MustCompile(
 	`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?$`)
 
-// versionOutputRE 為規格 5.7 所定 --version 輸出的正規表示式.
+// versionOutputRE 為規格 5.7 所定 --version 輸出的正規表示式. 沒有 commit 時不含
+// "+<commit>" 一段; 舊版的遠端程式以 "+unknown" 表示, 一併接受.
 var versionOutputRE = regexp.MustCompile(
-	`^gpumon (0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?\+([0-9a-f]{7}|unknown)(-dirty)? \(protocol ([1-9][0-9]*)\)$`)
+	`^gpumon (0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc)\.(0|[1-9][0-9]*))?(?:\+([0-9a-f]{7}|unknown)(-dirty)?)? \(protocol ([1-9][0-9]*)\)$`)
 
 // ParseProgramVersion 解析 x.y.z[-stage.N] 形式的程式版號.
 func ParseProgramVersion(s string) (ProgramVersion, error) {

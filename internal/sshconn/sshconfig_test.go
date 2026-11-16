@@ -97,6 +97,7 @@ Host target
   Port 2200
   ProxyJump bastion
   ProxyCommand nc %h %p
+  IdentitiesOnly yes
 `, 0o600)
 	writeFile(t, filepath.Join(env.home, "extra", "abs.conf"), `
 Host target
@@ -114,8 +115,8 @@ Host target
 	}
 	want := hostConfig{
 		HostName: "192.0.2.10", User: "target-user", Port: 2200,
-		IdentityFiles: []string{"~/.ssh/id_included"},
-		ProxyJump:     "bastion", proxySet: true,
+		IdentityFiles:  []string{"~/.ssh/id_included"},
+		IdentitiesOnly: true, identitiesOnlySet: true,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("target = %+v, want %+v", got, want)
@@ -127,29 +128,21 @@ Host target
 	}
 }
 
-func TestLoadHostConfigProxyFirstWins(t *testing.T) {
+func TestLoadHostConfigIdentitiesOnlyFirstWins(t *testing.T) {
 	env := newTestEnv(t)
 	writeFile(t, env.config, `
 Host a
-  ProxyCommand ssh -W %h:%p bastion
-  ProxyJump ignored
-Host b
-  ProxyJump none
-  ProxyCommand ignored
-Host c
-  ProxyJump user@j1:2222,j2
+  IdentitiesOnly no
+Host *
+  IdentitiesOnly yes
 `, 0o600)
 	a, _ := loadHostConfig(env.config, "a", env.home)
-	if a.ProxyCommand != "ssh -W %h:%p bastion" || a.ProxyJump != "" {
+	if a.IdentitiesOnly {
 		t.Errorf("a = %+v", a)
 	}
 	b, _ := loadHostConfig(env.config, "b", env.home)
-	if b.ProxyCommand != "" || b.ProxyJump != "" {
+	if !b.IdentitiesOnly {
 		t.Errorf("b = %+v", b)
-	}
-	c, _ := loadHostConfig(env.config, "c", env.home)
-	if c.ProxyJump != "user@j1:2222,j2" {
-		t.Errorf("c = %+v", c)
 	}
 }
 
@@ -159,31 +152,14 @@ func TestLoadHostConfigErrors(t *testing.T) {
 	if _, err := loadHostConfig(env.config, "x", env.home); err == nil {
 		t.Error("invalid port accepted")
 	}
+	writeFile(t, env.config, "Host x\n  IdentitiesOnly maybe\n", 0o600)
+	if _, err := loadHostConfig(env.config, "x", env.home); err == nil {
+		t.Error("invalid IdentitiesOnly accepted")
+	}
 	writeFile(t, env.config, "Include self\n", 0o600)
 	writeFile(t, filepath.Join(env.sshDir, "self"), "Include self\n", 0o600)
 	if _, err := loadHostConfig(env.config, "x", env.home); err == nil {
 		t.Error("recursive Include accepted")
-	}
-}
-
-func TestParseJumpHost(t *testing.T) {
-	cases := map[string]endpoint{
-		"bastion":            {alias: "bastion"},
-		"u@bastion":          {alias: "bastion", user: "u"},
-		"u@bastion:2222":     {alias: "bastion", user: "u", port: 2222},
-		"ssh://u@[::1]:2200": {alias: "::1", user: "u", port: 2200},
-		"10.0.0.1:22":        {alias: "10.0.0.1", port: 22},
-	}
-	for in, want := range cases {
-		got, err := parseJumpHost(in)
-		if err != nil || got != want {
-			t.Errorf("parseJumpHost(%q) = %+v, %v", in, got, err)
-		}
-	}
-	for _, in := range []string{"", "u@", "host:abc", "host:0"} {
-		if _, err := parseJumpHost(in); err == nil {
-			t.Errorf("parseJumpHost(%q) succeeded", in)
-		}
 	}
 }
 

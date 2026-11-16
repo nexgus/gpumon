@@ -146,6 +146,54 @@ export interface PromptClosed {
   id: string;
 }
 
+// HostKeyInfo 為一把主機金鑰: key_type 為金鑰種類 (例如 ssh-ed25519), fingerprint 為
+// SHA256 指紋, 格式同 OpenSSH.
+export interface HostKeyInfo {
+  key_type: string;
+  fingerprint: string;
+}
+
+// HostKeyPrompt 為等待使用者確認的主機金鑰. changed 為假表示未知的主機, old_keys 為空;
+// 為真表示主機金鑰已變更, old_keys 為記錄中所有的舊金鑰.
+export interface HostKeyPrompt {
+  id: string;
+  host: string;
+  name: string;
+  changed: boolean;
+  key: HostKeyInfo;
+  old_keys: HostKeyInfo[];
+}
+
+export interface HostKeyClosed {
+  id: string;
+}
+
+// KeySetupPrompt 為以密碼登入後, 詢問是否設定免密碼登入.
+export interface KeySetupPrompt {
+  id: string;
+  host: string;
+  name: string;
+}
+
+export interface KeySetupClosed {
+  id: string;
+}
+
+export type KeySetupChoice = "now" | "later" | "never";
+
+export type KeySetupOutcome = "success" | "generate-failed" | "append-failed";
+
+// KeySetupResult 為 "立即設定" 的結果, 只顯示, 不需回覆. key_file 為本機金鑰檔的路徑,
+// generated 表示該金鑰檔是否為本次產生, reason 為失敗原因的英文原文 (成功時為空字串).
+export interface KeySetupResult {
+  host: string;
+  name: string;
+  outcome: KeySetupOutcome;
+  key_file: string;
+  generated: boolean;
+  reason: string;
+}
+
 // UploadNotice 為上傳遠端程式之前的通知. update 為真表示更新, 為假表示首次上傳;
 // remote_version 於首次上傳時為空字串. path 恆為 ~/.gpumon/gpumon.
 export interface UploadNotice {
@@ -350,6 +398,8 @@ export interface SettingsData {
   // 預設排序方式與沒有任何條件的過濾條件不存放.
   proc_sorts: Record<string, ProcSort | undefined> | null;
   proc_filters: Record<string, ProcFilter | undefined> | null;
+  // no_key_setup_prompt 為記為不再詢問免密碼登入的主機識別字串.
+  no_key_setup_prompt: string[] | null;
 }
 
 // min_span_ms 與 max_monitor_span_ms 為顯示範圍長度的下限與監看畫面的上限 (毫秒).
@@ -407,6 +457,11 @@ export interface BackendEvents {
   "monitor:error": ConnectError;
   "monitor:prompt": Prompt;
   "monitor:prompt-closed": PromptClosed;
+  "monitor:host-key": HostKeyPrompt;
+  "monitor:host-key-closed": HostKeyClosed;
+  "monitor:key-setup": KeySetupPrompt;
+  "monitor:key-setup-closed": KeySetupClosed;
+  "monitor:key-setup-result": KeySetupResult;
   "monitor:upload": UploadNotice;
   "monitor:upload-closed": UploadClosed;
   "app:ui-settings": UISettings;
@@ -427,6 +482,8 @@ export interface Backend {
   disconnect(id: string): Promise<void>;
   answerPrompt(promptID: string, secret: string): Promise<void>;
   cancelPrompt(promptID: string): Promise<void>;
+  answerHostKey(promptID: string, accept: boolean): Promise<void>;
+  answerKeySetup(promptID: string, choice: KeySetupChoice): Promise<void>;
   confirmUpload(noticeID: string): Promise<void>;
   liveAll(): Promise<Live[]>;
   live(id: string): Promise<Live>;

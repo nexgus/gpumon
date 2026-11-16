@@ -9,7 +9,11 @@ import type {
   Curve,
   Field,
   HostConn,
+  HostKeyPrompt,
   HostStatus,
+  KeySetupChoice,
+  KeySetupPrompt,
+  KeySetupResult,
   Language,
   Live,
   ProcFilter,
@@ -94,6 +98,17 @@ export const connectErrorsStore = new Store<ConnectError[]>([]);
 export const operationErrorsStore = new Store<OperationError[]>([]);
 // promptsStore 只存輸入要求的說明 (主機, 種類, 次數), 不含輸入的值.
 export const promptsStore = new Store<Prompt[]>([]);
+// hostKeysStore 為等待使用者確認的主機金鑰, 依收到的先後排列.
+export const hostKeysStore = new Store<HostKeyPrompt[]>([]);
+// keySetupsStore 為等待使用者回答的免密碼登入詢問, 依收到的先後排列.
+export const keySetupsStore = new Store<KeySetupPrompt[]>([]);
+// KeyResultNotice 為待使用者確認的免密碼登入結果. 後端的結果事件沒有識別字串, 由前端
+// 於收到時編號, 供佇列區分.
+export interface KeyResultNotice extends KeySetupResult {
+  id: string;
+}
+export const keyResultsStore = new Store<KeyResultNotice[]>([]);
+let keyResultSeq = 0;
 // uploadsStore 為等待使用者確認的上傳通知, 依收到的先後排列.
 export const uploadsStore = new Store<UploadNotice[]>([]);
 // quitStore 為等待使用者確認的結束要求; 再次要求結束時以新的主機數取代.
@@ -161,15 +176,19 @@ function updateTabs(key: keyof MonitorTabsState, fn: (ids: Set<string>) => void)
   });
 }
 
-// 密碼輸入視窗, 上傳通知視窗, 連線錯誤視窗, 操作失敗視窗與結束確認視窗同一時間只
-// 顯示一個. modalQueueStore 依出現的先後排列這些視窗, 只顯示第一個; 新出現的視窗排在
-// 後面, 不遮蔽顯示中的視窗, 顯示中的視窗關閉後才顯示下一個. 鍵依序為 "prompt:<id>",
+// 密碼輸入視窗, 主機金鑰確認視窗, 免密碼登入的詢問與結果視窗, 上傳通知視窗, 連線錯誤
+// 視窗, 操作失敗視窗與結束確認視窗同一時間只顯示一個. modalQueueStore 依出現的先後排列
+// 這些視窗, 只顯示第一個; 新出現的視窗排在後面, 不遮蔽顯示中的視窗, 顯示中的視窗關閉後
+// 才顯示下一個. 鍵依序為 "prompt:<id>", "hostkey:<id>", "keysetup:<id>", "keyresult:<id>",
 // "upload:<id>", "connect-errors", "operation-errors" 與 "quit".
 export const modalQueueStore = new Store<string[]>([]);
 
 function syncModalQueue(): void {
   const present = [
     ...promptsStore.get().map((p) => `prompt:${p.id}`),
+    ...hostKeysStore.get().map((k) => `hostkey:${k.id}`),
+    ...keySetupsStore.get().map((k) => `keysetup:${k.id}`),
+    ...keyResultsStore.get().map((k) => `keyresult:${k.id}`),
     ...uploadsStore.get().map((u) => `upload:${u.id}`),
     ...(connectErrorsStore.get().length > 0 ? ["connect-errors"] : []),
     ...(operationErrorsStore.get().length > 0 ? ["operation-errors"] : []),
@@ -183,6 +202,9 @@ function syncModalQueue(): void {
 }
 
 promptsStore.subscribe(syncModalQueue);
+hostKeysStore.subscribe(syncModalQueue);
+keySetupsStore.subscribe(syncModalQueue);
+keyResultsStore.subscribe(syncModalQueue);
 uploadsStore.subscribe(syncModalQueue);
 connectErrorsStore.subscribe(syncModalQueue);
 operationErrorsStore.subscribe(syncModalQueue);
@@ -253,6 +275,13 @@ export async function init(): Promise<() => void> {
     ),
     backend.on("monitor:prompt", (p) => promptsStore.update((list) => [...list, p])),
     backend.on("monitor:prompt-closed", (c) => promptsStore.update((list) => list.filter((p) => p.id !== c.id))),
+    backend.on("monitor:host-key", (k) => hostKeysStore.update((list) => [...list, k])),
+    backend.on("monitor:host-key-closed", (c) => hostKeysStore.update((list) => list.filter((k) => k.id !== c.id))),
+    backend.on("monitor:key-setup", (k) => keySetupsStore.update((list) => [...list, k])),
+    backend.on("monitor:key-setup-closed", (c) => keySetupsStore.update((list) => list.filter((k) => k.id !== c.id))),
+    backend.on("monitor:key-setup-result", (r) =>
+      keyResultsStore.update((list) => [...list, { ...r, id: `r${++keyResultSeq}` }]),
+    ),
     backend.on("monitor:upload", (n) => uploadsStore.update((list) => [...list, n])),
     backend.on("monitor:upload-closed", (c) => uploadsStore.update((list) => list.filter((n) => n.id !== c.id))),
     backend.on("app:quit-request", (q) => quitStore.set(q)),
@@ -683,6 +712,24 @@ export function selectHistoryMax(sel: MaxSelection, t: number): void {
 // reportOperationFailure 把某項操作失敗的原因顯示於錯誤視窗.
 export function reportOperationFailure(name: string, error: ServiceError): void {
   operationErrorsStore.update((list) => [...list, { name, error }]);
+}
+
+// answerHostKey 送出主機金鑰的回覆 (accept 為真即同意繼續連線) 並關閉該視窗. 詢問已失效時
+// 後端回傳錯誤, 視窗已關閉, 忽略.
+export function answerHostKey(id: string, accept: boolean): void {
+  hostKeysStore.update((list) => list.filter((k) => k.id !== id));
+  void backend.answerHostKey(id, accept).catch(() => undefined);
+}
+
+// answerKeySetup 送出免密碼登入詢問的回覆並關閉該視窗.
+export function answerKeySetup(id: string, choice: KeySetupChoice): void {
+  keySetupsStore.update((list) => list.filter((k) => k.id !== id));
+  void backend.answerKeySetup(id, choice).catch(() => undefined);
+}
+
+// dismissKeyResult 關閉免密碼登入的結果視窗.
+export function dismissKeyResult(id: string): void {
+  keyResultsStore.update((list) => list.filter((k) => k.id !== id));
 }
 
 // confirmUpload 送出上傳通知的確認並關閉該通知視窗.

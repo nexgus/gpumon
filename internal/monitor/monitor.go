@@ -66,7 +66,8 @@ type Options struct {
 	DataDir string
 	// Settings 為設定的存取物件, 主機清單取自此處.
 	Settings *settings.Store
-	// Dialer 建立連線; nil 時使用 SSHDialer 的零值.
+	// Dialer 建立連線; nil 時使用 SSHDialer, 程式自己的 known_hosts 為 DataDir 下的
+	// known_hosts, 其餘欄位為零值.
 	Dialer Dialer
 	// Notifier 接收通知; nil 時捨棄通知.
 	Notifier Notifier
@@ -83,17 +84,20 @@ type Options struct {
 
 // Manager 管理所有主機的連線工作階段. 所有方法皆可由多個 goroutine 同時呼叫.
 type Manager struct {
-	dataDir  string
-	store    *settings.Store
-	dialer   Dialer
-	notify   Notifier
-	resolve  UserResolver
-	log      *slog.Logger
-	now      func() time.Time
-	timing   Timing
-	prompts  promptBroker
-	uploads  uploadBroker
-	sessions map[string]*session
+	dataDir   string
+	store     *settings.Store
+	dialer    Dialer
+	notify    Notifier
+	resolve   UserResolver
+	log       *slog.Logger
+	now       func() time.Time
+	timing    Timing
+	ids       idSeq
+	prompts   promptBroker
+	uploads   uploadBroker
+	hostKeys  replyBroker[bool]
+	keySetups replyBroker[KeySetupChoice]
+	sessions  map[string]*session
 
 	mu     sync.Mutex
 	closed bool
@@ -113,7 +117,7 @@ func New(opts Options) *Manager {
 		sessions: map[string]*session{},
 	}
 	if m.dialer == nil {
-		m.dialer = SSHDialer{}
+		m.dialer = SSHDialer{KnownHostsPath: settings.KnownHostsPath(m.dataDir)}
 	}
 	if m.notify == nil {
 		m.notify = NotifierFunc(func(string, any) {})
@@ -130,8 +134,16 @@ func New(opts Options) *Manager {
 	if m.timing == (Timing{}) {
 		m.timing = DefaultTiming()
 	}
-	m.prompts.notify = m.notify
-	m.uploads.notify = m.notify
+	m.prompts.notify, m.prompts.ids = m.notify, &m.ids
+	m.uploads.notify, m.uploads.ids = m.notify, &m.ids
+	m.hostKeys = replyBroker[bool]{
+		notify: m.notify, ids: &m.ids, event: EventHostKey, closed: EventHostKeyClosed,
+		closedData: func(id string) any { return HostKeyClosed{ID: id} }, what: "host key confirmation",
+	}
+	m.keySetups = replyBroker[KeySetupChoice]{
+		notify: m.notify, ids: &m.ids, event: EventKeySetup, closed: EventKeySetupClosed,
+		closedData: func(id string) any { return KeySetupClosed{ID: id} }, what: "passwordless login prompt",
+	}
 	return m
 }
 
@@ -435,6 +447,24 @@ func (m *Manager) CancelPrompt(id string) error {
 // CodeNotFound.
 func (m *Manager) ConfirmUpload(id string) error {
 	return m.uploads.confirm(id)
+}
+
+// AnswerHostKey 回覆主機金鑰的確認. accept 為真時把主機金鑰寫入程式自己的
+// known_hosts 並繼續連線; 為假時中止該次連線, 不顯示錯誤. 詢問已失效時回傳
+// CodeNotFound.
+func (m *Manager) AnswerHostKey(id string, accept bool) error {
+	return m.hostKeys.reply(id, accept)
+}
+
+// AnswerKeySetup 回覆免密碼登入的詢問. choice 不合法時回傳 CodeInvalid, 詢問已
+// 失效時回傳 CodeNotFound.
+func (m *Manager) AnswerKeySetup(id string, choice KeySetupChoice) error {
+	switch choice {
+	case KeySetupNow, KeySetupLater, KeySetupNever:
+	default:
+		return newErr(CodeInvalid, "Invalid answer %q", choice)
+	}
+	return m.keySetups.reply(id, choice)
 }
 
 // Close 中斷所有連線, 把尚未存檔的取樣寫入記錄檔, 並銷毀所有密碼. 之後不可再

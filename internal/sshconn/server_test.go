@@ -4,6 +4,7 @@ package sshconn
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/binary"
@@ -23,7 +24,8 @@ import (
 )
 
 // testServer 為測試用的本機 SSH 伺服器. 支援密碼與公鑰認證, exec (交由本機的
-// /bin/sh 執行, 或由 execHook 攔截), sftp 子系統與 direct-tcpip 轉接.
+// /bin/sh 執行, 或由 execHook 攔截) 與 sftp 子系統. 公鑰認證接受以 authorize
+// 登記的公鑰, 以及 <home>/.ssh/authorized_keys 所列的公鑰.
 type testServer struct {
 	t          *testing.T
 	ln         net.Listener
@@ -39,6 +41,8 @@ type testServer struct {
 	execHook func(cmd string) (out string, code int, handled bool)
 	execLog  []string
 	conns    int
+	// offered 為公鑰認證依序收到的公鑰指紋, 相鄰重複者合併.
+	offered []string
 	// noBanner 為真時接受 TCP 連線但不回應, 用於測試逾時.
 	noBanner bool
 	// ignoreGlobal 為真時不回覆連線層級的請求 (例如 keepalive), 模擬無回應的遠端.
@@ -104,6 +108,31 @@ func (s *testServer) authorize(pub ssh.PublicKey) {
 	s.authorized[string(pub.Marshal())] = true
 }
 
+// inAuthorizedKeys 回報 key 是否列於 <home>/.ssh/authorized_keys. 呼叫端須持有 s.mu.
+func (s *testServer) inAuthorizedKeys(key ssh.PublicKey) bool {
+	data, err := os.ReadFile(filepath.Join(s.home, ".ssh", "authorized_keys"))
+	if err != nil {
+		return false
+	}
+	for len(data) > 0 {
+		pub, _, _, rest, err := ssh.ParseAuthorizedKey(data)
+		if err != nil {
+			return false
+		}
+		if bytes.Equal(pub.Marshal(), key.Marshal()) {
+			return true
+		}
+		data = rest
+	}
+	return false
+}
+
+func (s *testServer) offeredKeys() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.offered...)
+}
+
 func (s *testServer) commands() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -142,7 +171,11 @@ func (s *testServer) handle(c net.Conn) {
 		PublicKeyCallback: func(meta ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
 			s.mu.Lock()
 			defer s.mu.Unlock()
-			if s.authorized[string(key.Marshal())] {
+			fp := ssh.FingerprintSHA256(key)
+			if n := len(s.offered); n == 0 || s.offered[n-1] != fp {
+				s.offered = append(s.offered, fp)
+			}
+			if s.authorized[string(key.Marshal())] || s.inAuthorizedKeys(key) {
 				return nil, nil
 			}
 			return nil, errors.New("unknown key")
@@ -174,36 +207,6 @@ func (s *testServer) handle(c net.Conn) {
 				continue
 			}
 			go s.session(ch, creqs)
-		case "direct-tcpip":
-			var p struct {
-				Host     string
-				Port     uint32
-				OrigHost string
-				OrigPort uint32
-			}
-			if err := ssh.Unmarshal(nc.ExtraData(), &p); err != nil {
-				nc.Reject(ssh.ConnectionFailed, "bad payload")
-				continue
-			}
-			target, err := net.Dial("tcp", net.JoinHostPort(p.Host, strconv.Itoa(int(p.Port))))
-			if err != nil {
-				nc.Reject(ssh.ConnectionFailed, err.Error())
-				continue
-			}
-			ch, creqs, err := nc.Accept()
-			if err != nil {
-				target.Close()
-				continue
-			}
-			go ssh.DiscardRequests(creqs)
-			go func() {
-				io.Copy(ch, target)
-				ch.CloseWrite()
-			}()
-			go func() {
-				io.Copy(target, ch)
-				target.Close()
-			}()
 		default:
 			nc.Reject(ssh.UnknownChannelType, "unsupported")
 		}
@@ -291,12 +294,14 @@ func (s *testServer) runLocal(ch ssh.Channel, command string) {
 	sendExit(ch, code)
 }
 
-// testEnv 為測試用的本機目錄配置, 所有路徑皆位於暫存目錄.
+// testEnv 為測試用的本機目錄配置, 所有路徑皆位於暫存目錄. knownHosts 為 OpenSSH
+// 的 known_hosts, ownKnownHosts 為程式自己的 known_hosts.
 type testEnv struct {
-	home       string
-	sshDir     string
-	config     string
-	knownHosts string
+	home          string
+	sshDir        string
+	config        string
+	knownHosts    string
+	ownKnownHosts string
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -308,16 +313,20 @@ func newTestEnv(t *testing.T) *testEnv {
 	}
 	return &testEnv{
 		home: home, sshDir: sshDir,
-		config:     filepath.Join(sshDir, "config"),
-		knownHosts: filepath.Join(sshDir, "known_hosts"),
+		config:        filepath.Join(sshDir, "config"),
+		knownHosts:    filepath.Join(sshDir, "known_hosts"),
+		ownKnownHosts: filepath.Join(home, "appdata", "known_hosts"),
 	}
 }
 
+// cfg 回傳連線至 s 的設定. 主機金鑰需要確認時一律接受.
 func (e *testEnv) cfg(s *testServer) Config {
 	return Config{
 		Host: s.host, Port: s.portNum(), User: "tester",
-		HomeDir: e.home, SSHConfigPath: e.config, KnownHostsPath: e.knownHosts, KeyDir: e.sshDir,
-		Agent: NoAgent,
+		HomeDir: e.home, SSHConfigPath: e.config, KeyDir: e.sshDir,
+		KnownHostsPath: e.ownKnownHosts, OpenSSHKnownHostsPath: e.knownHosts,
+		Agent:   NoAgent,
+		HostKey: func(context.Context, HostKeyRequest) error { return nil },
 	}
 }
 

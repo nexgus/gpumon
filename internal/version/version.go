@@ -19,5 +19,9 @@ var (
 
 // Full 回傳完整版本字串 x.y.z[-stage.N]+<commit>[-dirty].
 func Full() string {
-	return VERSION + "+" + GitCommitHash
+	if GitCommitHash == "unknown" {
+		return VERSION
+	} else {
+		return VERSION + "+" + GitCommitHash
+	}
 }

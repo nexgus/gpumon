@@ -66,6 +66,8 @@ func TestParseVersionOutput(t *testing.T) {
 		{"gpumon 0.2.0-beta.3+3f2a9c1-dirty (protocol 2)\n", "0.2.0-beta.3", 2},
 		{"gpumon 0.1.0+unknown (protocol 1)\n", "0.1.0", 1},
 		{"gpumon 0.1.0+unknown-dirty (protocol 12)", "0.1.0", 12},
+		{"gpumon 0.1.0 (protocol 1)\n", "0.1.0", 1},
+		{"gpumon 0.2.0-rc.1 (protocol 4)", "0.2.0-rc.1", 4},
 		{"gpumon 10.20.30-rc.0+abcdef0 (protocol 3)\n", "10.20.30-rc.0", 3},
 	}
 	for _, c := range good {
@@ -81,7 +83,8 @@ func TestParseVersionOutput(t *testing.T) {
 	bad := []string{
 		"",
 		"\n",
-		"gpumon 0.1.0 (protocol 1)\n",
+		"gpumon 0.1.0+ (protocol 1)\n",
+		"gpumon 0.1.0-dirty (protocol 1)\n",
 		"gpumon 0.1.0+3F2A9C1 (protocol 1)\n",
 		"gpumon 0.1.0+3f2a9c (protocol 1)\n",
 		"gpumon 0.1.0+3f2a9c1 (protocol 0)\n",

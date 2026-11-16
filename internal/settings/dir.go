@@ -34,6 +34,14 @@ func DefaultDir() (string, error) {
 	return filepath.Join(base, dirName), nil
 }
 
+// KnownHostsName 為程式自己的 known_hosts 在應用程式資料目錄下的檔名.
+const KnownHostsName = "known_hosts"
+
+// KnownHostsPath 回傳指定應用程式資料目錄下程式自己的 known_hosts 路徑.
+func KnownHostsPath(appDir string) string {
+	return filepath.Join(appDir, KnownHostsName)
+}
+
 // HistoryDir 回傳指定應用程式資料目錄下存放記錄檔的目錄.
 func HistoryDir(appDir string) string {
 	return filepath.Join(appDir, HistoryDirName)

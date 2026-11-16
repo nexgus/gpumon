@@ -1903,3 +1903,32 @@ html.dark .check:indeterminate {
 .check:disabled {
   opacity: 0.5;
 }
+
+/* 主機金鑰確認視窗. */
+.hostkey-warning {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border: 1px solid var(--err);
+  border-radius: 6px;
+  color: var(--err);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-wrap: pretty;
+}
+
+.hostkey-warning svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.key-value {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.key-type {
+  color: var(--text-3);
+}

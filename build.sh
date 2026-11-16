@@ -104,7 +104,12 @@ fi
 if ! COMMIT=$(bash scripts/product_commit.sh 2>/dev/null); then
     COMMIT=unknown
 fi
-FULLVER="${VER}+${COMMIT}"
+# 完整版本字串與 version.Full() 相同, commit 為 unknown 時不含 "+<commit>" 一段.
+if [ "$COMMIT" = unknown ]; then
+    FULLVER="$VER"
+else
+    FULLVER="${VER}+${COMMIT}"
+fi
 # MSI Product Version 與 Info.plist 的版本欄位只接受純數字.
 PUREVER="${VER%%-*}"
 # 建置時間為 ISO 8601 extended 格式, BSD date 的 %z 不含冒號, 以 sed 補上.
@@ -162,7 +167,7 @@ function archive_old_outputs {
             gpumon-*) ;;
             *) continue ;;
         esac
-        ver=$(printf '%s\n' "$base" | sed -E -n 's/^gpumon-([0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?\+([0-9a-f]{7}|unknown)(-dirty)?)-.*/\1/p')
+        ver=$(printf '%s\n' "$base" | sed -E -n 's/^gpumon-([0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?(\+([0-9a-f]{7}|unknown)(-dirty)?)?)-.*/\1/p')
         if [ -z "$ver" ]; then
             ver=unknown
         fi

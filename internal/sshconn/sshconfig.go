@@ -11,18 +11,17 @@ import (
 	"strings"
 )
 
-// hostConfig 為 ~/.ssh/config 中適用於某個 Host 名稱的設定, 只含規格所列的六項.
-// 字串為空表示未設定; Port 為 0 表示未設定.
+// hostConfig 為 ~/.ssh/config 中適用於某個 Host 名稱的設定, 只含規格所列的五項.
+// 字串為空表示未設定; Port 為 0 表示未設定. ProxyJump 與 ProxyCommand 不支援,
+// 與其他項目同樣忽略, 直接連線至該主機.
 type hostConfig struct {
 	HostName      string
 	User          string
 	Port          int
 	IdentityFiles []string
-	// ProxyJump 與 ProxyCommand 依 OpenSSH 的規則以先出現者為準, 另一項忽略.
-	// 值為 "none" 時視為未設定, 但仍阻擋之後出現的設定.
-	ProxyJump    string
-	ProxyCommand string
-	proxySet     bool
+	// IdentitiesOnly 為真時, ssh-agent 的金鑰只保留與金鑰檔相同者.
+	IdentitiesOnly    bool
+	identitiesOnlySet bool
 }
 
 // maxIncludeDepth 與 OpenSSH 的 READCONF_MAX_DEPTH 相同.
@@ -131,15 +130,7 @@ func (p *configParser) include(pattern string, neverMatch bool, depth int) error
 
 func (p *configParser) apply(keyword, rest string) error {
 	switch keyword {
-	case "hostname", "user", "port", "identityfile", "proxyjump":
-	case "proxycommand":
-		if !p.cfg.proxySet {
-			p.cfg.proxySet = true
-			if v := strings.TrimSpace(rest); !strings.EqualFold(v, "none") {
-				p.cfg.ProxyCommand = v
-			}
-		}
-		return nil
+	case "hostname", "user", "port", "identityfile", "identitiesonly":
 	default:
 		return nil
 	}
@@ -170,12 +161,18 @@ func (p *configParser) apply(keyword, rest string) error {
 		}
 	case "identityfile":
 		p.cfg.IdentityFiles = append(p.cfg.IdentityFiles, v)
-	case "proxyjump":
-		if !p.cfg.proxySet {
-			p.cfg.proxySet = true
-			if !strings.EqualFold(v, "none") {
-				p.cfg.ProxyJump = v
-			}
+	case "identitiesonly":
+		var on bool
+		switch strings.ToLower(v) {
+		case "yes", "true":
+			on = true
+		case "no", "false":
+		default:
+			return fmt.Errorf("invalid IdentitiesOnly value %q", v)
+		}
+		if !p.cfg.identitiesOnlySet {
+			p.cfg.identitiesOnlySet = true
+			p.cfg.IdentitiesOnly = on
 		}
 	}
 	return nil

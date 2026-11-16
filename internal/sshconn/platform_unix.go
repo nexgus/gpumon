@@ -7,12 +7,7 @@ import (
 	"errors"
 	"net"
 	"os"
-	"os/exec"
 )
-
-func proxyShellCommand(command string) *exec.Cmd {
-	return exec.Command(shellPath(), "-c", "exec "+command)
-}
 
 // defaultAgentDialer 連線至 SSH_AUTH_SOCK 所指的 ssh-agent.
 func defaultAgentDialer(ctx context.Context) (net.Conn, error) {

@@ -314,8 +314,9 @@ var errNoSecret = errors.New("the saved password was rejected or a password is r
 // uploadPath 為通知視窗顯示的遠端放置路徑.
 const uploadPath = "~/" + sshconn.RemoteDir + "/" + sshconn.RemoteName
 
-// auth 回傳連線所用的回呼函數. 自動重新連線時只使用暫留的登入密碼, 不要求輸入;
-// 需要上傳遠端程式時, 首次連線與自動重新連線皆送出上傳通知並等待確認.
+// auth 回傳連線所用的回呼函數. 自動重新連線時只使用暫留的登入密碼, 不要求輸入,
+// 不詢問主機金鑰與免密碼登入; 需要上傳遠端程式時, 首次連線與自動重新連線皆送出
+// 上傳通知並等待確認.
 func (s *session) auth(ctx context.Context, reconnect bool) Auth {
 	s.secMu.Lock()
 	keys := s.keys
@@ -347,9 +348,29 @@ func (s *session) auth(ctx context.Context, reconnect bool) Auth {
 			},
 		}
 	}
-	return Auth{
+	a := Auth{
 		KeyCache:      keys,
 		ConfirmUpload: confirm,
+		HostKey: func(hctx context.Context, req sshconn.HostKeyRequest) error {
+			p := HostKeyPrompt{
+				Host: s.id, Name: name, Changed: req.Changed,
+				Key: HostKeyInfo{KeyType: req.Key.Type, Fingerprint: req.Key.Fingerprint}, OldKeys: []HostKeyInfo{},
+			}
+			for _, k := range req.Old {
+				p.OldKeys = append(p.OldKeys, HostKeyInfo{KeyType: k.Type, Fingerprint: k.Fingerprint})
+			}
+			accept, err := s.m.hostKeys.ask(hctx, func(id string) any {
+				p.ID = id
+				return p
+			})
+			if err != nil {
+				return err
+			}
+			if !accept {
+				return sshconn.ErrCanceled
+			}
+			return nil
+		},
 		Password: func(pctx context.Context, req sshconn.PasswordRequest) ([]byte, error) {
 			b, err := s.m.prompts.ask(pctx, Prompt{
 				Host: s.id, Name: name, Kind: PromptPassword, User: req.User, Server: req.Host, Attempt: req.Attempt,
@@ -368,6 +389,49 @@ func (s *session) auth(ctx context.Context, reconnect bool) Auth {
 				Host: s.id, Name: name, Kind: PromptPassphrase, KeyFile: req.KeyFile, Attempt: req.Attempt,
 			})
 		},
+	}
+	if !s.m.store.NoKeySetupPrompt(s.id) {
+		a.KeySetup = func(kctx context.Context, _ sshconn.KeySetupRequest) (sshconn.KeySetupChoice, error) {
+			choice, err := s.m.keySetups.ask(kctx, func(id string) any {
+				return KeySetupPrompt{ID: id, Host: s.id, Name: name}
+			})
+			if err != nil {
+				return 0, err
+			}
+			switch choice {
+			case KeySetupNow:
+				return sshconn.KeySetupNow, nil
+			case KeySetupNever:
+				s.disableKeySetupPrompt()
+				return sshconn.KeySetupNever, nil
+			}
+			return sshconn.KeySetupLater, nil
+		}
+		a.KeySetupDone = func(r sshconn.KeySetupResult) {
+			res := KeySetupResult{Host: s.id, Name: name, KeyFile: r.KeyFile, Generated: r.Generated}
+			switch r.Outcome {
+			case sshconn.KeySetupSucceeded:
+				res.Outcome = KeySetupSucceeded
+			case sshconn.KeySetupGenerateFailed:
+				res.Outcome = KeySetupGenerateFailed
+			default:
+				res.Outcome = KeySetupAppendFailed
+				s.disableKeySetupPrompt()
+			}
+			if r.Err != nil {
+				res.Reason = r.Err.Error()
+			}
+			s.m.log.Info("passwordless login setup", "host", s.id, "outcome", res.Outcome, "key", res.KeyFile, "reason", res.Reason)
+			s.m.notify.Notify(EventKeySetupResult, res)
+		}
+	}
+	return a
+}
+
+// disableKeySetupPrompt 把主機記為不再詢問免密碼登入. 寫入設定檔失敗時記錄到日誌.
+func (s *session) disableKeySetupPrompt() {
+	if err := s.m.store.SetNoKeySetupPrompt(s.id); err != nil {
+		s.m.log.Warn("cannot record the passwordless login preference", "host", s.id, "err", err)
 	}
 }
 
