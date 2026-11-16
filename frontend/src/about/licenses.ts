@@ -24,8 +24,8 @@ export interface Notice {
 }
 
 // LicenseText 為一份授權全文與適用該全文的元件. id 為頁內錨點, title 為授權種類;
-// 同種授權的本文有多種寫法時 (例如 BSD-3-Clause 的第三款載明不同的機構), 第二種
-// 起於 title 加上序號, 分別列出全文.
+// 同種授權的本文有多種寫法時 (例如 BSD-3-Clause 的第三款載明不同的機構), 分別列出
+// 全文, title 的訂法見 titleVariants.
 export interface LicenseText {
   id: string;
   title: string;
@@ -105,34 +105,71 @@ function bodyKey(body: string): string {
     .trim();
 }
 
-// buildLicenseView 整理授權清單. 直接引用依序為 Go, npm 與其他素材, 間接引用依序為 Go
-// 與 npm, 各類內的順序與資料檔相同. 授權全文依第一個引用它的元件的順序排列.
+const namedOrg = /\bneither the name of (?:the )?(.+?)\s+nor\b/i;
+
+// orgOf 取出授權本文中 "Neither the name of <機構> nor" 所載的機構名稱, 例如 BSD-3-Clause
+// 第三款的 "Google LLC"; 本文沒有這句話時回傳空字串.
+function orgOf(body: string): string {
+  const m = namedOrg.exec(body.replace(/\s+/g, " "));
+  return m ? m[1].trim() : "";
+}
+
+// titleVariants 為同種授權而本文不同的各份全文訂定標題. 各份皆載有機構名稱且彼此
+// 不同時, 每份的標題為授權種類加上該機構名稱, 例如 "BSD-3-Clause (Google LLC)";
+// 否則第二份起於授權種類後加上序號, 例如 "BSD-3-Clause (2)".
+function titleVariants(license: string, group: LicenseText[]): void {
+  const orgs = group.map((lt) => orgOf(lt.body));
+  if (orgs.every((o) => o !== "") && new Set(orgs).size === orgs.length) {
+    group.forEach((lt, i) => (lt.title = `${license} (${orgs[i]})`));
+    return;
+  }
+  group.forEach((lt, i) => (lt.title = i === 0 ? license : `${license} (${i + 1})`));
+}
+
+// byName 依元件名稱排序, 不分大小寫, 名稱只有大小寫不同時再依原字串. 以字元碼比較,
+// 不用 localeCompare, 以免語系的排序規則忽略 "@" 等符號.
+function byName(a: LicenseEntry, b: LicenseEntry): number {
+  const la = a.name.toLowerCase();
+  const lb = b.name.toLowerCase();
+  if (la !== lb) {
+    return la < lb ? -1 : 1;
+  }
+  return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+}
+
+// buildLicenseView 整理授權清單. 直接引用與間接引用兩張表各自把 Go, npm 與其他素材合在
+// 一起, 依元件名稱排序 (見 byName). 授權全文依第一個引用它的元件的順序排列, 直接引用在前.
 export function buildLicenseView(d: LicenseData): LicenseView {
   const texts: LicenseText[] = [];
   const byKey = new Map<string, LicenseText>();
-  const variants = new Map<string, number>();
-  const component = (e: LicenseEntry): Component => {
+  const byLicense = new Map<string, LicenseText[]>();
+  const component = (e: LicenseEntry): { entry: LicenseEntry; text: LicenseText } => {
     const { notice, body, terms } = splitLicense(e.text);
     const key = `${e.license}\n${bodyKey(terms)}`;
     let lt = byKey.get(key);
     if (!lt) {
-      const n = (variants.get(e.license) ?? 0) + 1;
-      variants.set(e.license, n);
-      lt = {
-        id: `license-${texts.length + 1}`,
-        title: n === 1 ? e.license : `${e.license} (${n})`,
-        body,
-        notices: [],
-      };
+      lt = { id: `license-${texts.length + 1}`, title: e.license, body, notices: [] };
       byKey.set(key, lt);
       texts.push(lt);
+      byLicense.set(e.license, [...(byLicense.get(e.license) ?? []), lt]);
     }
     lt.notices.push({ name: e.name, text: notice });
-    return { name: e.name, url: e.url, license: lt.title, textID: lt.id };
+    return { entry: e, text: lt };
   };
-  const direct = [...d.go.direct, ...d.npm.direct, ...d.other].map(component);
-  const indirect = [...d.go.indirect, ...d.npm.indirect].map(component);
-  return { direct, indirect, texts };
+  const direct = [...d.go.direct, ...d.npm.direct, ...d.other].sort(byName).map(component);
+  const indirect = [...d.go.indirect, ...d.npm.indirect].sort(byName).map(component);
+  for (const [license, group] of byLicense) {
+    if (group.length > 1) {
+      titleVariants(license, group);
+    }
+  }
+  const toComponent = ({ entry, text }: { entry: LicenseEntry; text: LicenseText }): Component => ({
+    name: entry.name,
+    url: entry.url,
+    license: text.title,
+    textID: text.id,
+  });
+  return { direct: direct.map(toComponent), indirect: indirect.map(toComponent), texts };
 }
 
 const listMarker = /^(\*|-|•|\(?[a-z0-9]{1,3}[.)])\s/i;
