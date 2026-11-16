@@ -11,6 +11,7 @@ import (
 	"errors"
 	"io/fs"
 	"log/slog"
+	"strings"
 	"sync/atomic"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -18,6 +19,7 @@ import (
 	"gpumon/internal/history"
 	"gpumon/internal/monitor"
 	"gpumon/internal/protocol"
+	"gpumon/internal/recording"
 	"gpumon/internal/settings"
 	"gpumon/internal/sshconn"
 )
@@ -68,15 +70,54 @@ func New(dataDir string, log *slog.Logger) *Backend {
 	if err != nil {
 		log.Warn("settings", "err", err)
 	}
+	upgradeLegacyHosts(dataDir, store, sshconn.UserConfigDefaults, log)
 	b := &Backend{dataDir: dataDir, store: store}
 	b.monitor = monitor.New(monitor.Options{
-		DataDir:     dataDir,
-		Settings:    store,
-		Notifier:    monitor.NotifierFunc(b.notify),
-		ResolveUser: sshconn.ConfigUser,
-		Logger:      log,
+		DataDir:  dataDir,
+		Settings: store,
+		Notifier: monitor.NotifierFunc(b.notify),
+		Logger:   log,
 	})
 	return b
+}
+
+// upgradeLegacyHosts 以 ~/.ssh/config 填入舊版設定檔中各主機空白的欄位一次, 見
+// settings.Store.UpgradeLegacyHosts. 主機識別因填入連接埠而改變時, 該主機原有的記錄檔
+// 改以新的識別記錄, 使其仍對應到同一台主機; 搬移於設定檔寫回之前進行, 寫回前程式
+// 中止時下次啟動再處理一次. ~/.ssh/config 的問題與搬移失敗只記錄到日誌.
+func upgradeLegacyHosts(dataDir string, store *settings.Store,
+	lookup func(addr string) (sshconn.ConfigDefaults, error), log *slog.Logger) {
+	if !store.HasLegacyHosts() {
+		return
+	}
+	defaults := func(addr string) settings.LegacyDefaults {
+		d, err := lookup(addr)
+		if err != nil {
+			log.Warn("cannot read the SSH configuration", "host", addr, "err", err)
+			return settings.LegacyDefaults{}
+		}
+		for _, w := range d.Warnings {
+			log.Warn("SSH configuration", "host", addr, "warning", w)
+		}
+		return settings.LegacyDefaults{User: d.User, Port: d.Port, KeyFile: d.KeyFile, IdentitiesOnly: d.IdentitiesOnly}
+	}
+	moveRecordings := func(ups []settings.HostUpgrade) {
+		for _, u := range ups {
+			if u.OldRecordingHost == "" || u.OldRecordingHost == u.NewID {
+				continue
+			}
+			if err := recording.Rehost(dataDir, u.OldRecordingHost, u.NewID); err != nil {
+				log.Warn("cannot move recordings to the new host name", "from", u.OldRecordingHost, "to", u.NewID, "err", err)
+			}
+		}
+	}
+	ups, err := store.UpgradeLegacyHosts(defaults, moveRecordings)
+	for _, u := range ups {
+		log.Info("upgraded host settings", "from", u.OldID, "to", u.NewID)
+	}
+	if err != nil {
+		log.Warn("cannot save the upgraded host settings", "err", err)
+	}
 }
 
 // emit 把通知轉為 Wails 事件.
@@ -265,6 +306,42 @@ func (s *HostService) ChooseKeyFile(title string) (string, error) {
 	}
 	path, err := d.PromptForSingleSelection()
 	return path, toErr(err)
+}
+
+// SSHConfigDefaults 為 ~/.ssh/config 對某個位址的設定, 供主機表單預填. Port 為 0 與
+// KeyFile 為空字串表示無設定; KeyFile 已展開 ~ 與 OpenSSH 的 % 記號. IdentitiesOnlySet
+// 為設定檔是否有 IdentitiesOnly 的設定. Warnings 為讀取時略過之處的英文警告.
+type SSHConfigDefaults struct {
+	Port              int      `json:"port"`
+	KeyFile           string   `json:"key_file"`
+	IdentitiesOnly    bool     `json:"identities_only"`
+	IdentitiesOnlySet bool     `json:"identities_only_set"`
+	Warnings          []string `json:"warnings"`
+}
+
+// SSHConfigDefaults 回傳 ~/.ssh/config 以 addr 為 Host 名稱的設定, 供主機表單預填.
+// addr 去除前後空白後為空時回傳全部為零值的結果. 設定檔的問題一律放在 Warnings,
+// 只有無法取得本機家目錄等內部錯誤才回傳錯誤.
+func (s *HostService) SSHConfigDefaults(addr string) (SSHConfigDefaults, error) {
+	return sshConfigDefaults(addr, sshconn.UserConfigDefaults)
+}
+
+func sshConfigDefaults(addr string, lookup func(string) (sshconn.ConfigDefaults, error)) (SSHConfigDefaults, error) {
+	out := SSHConfigDefaults{Warnings: []string{}}
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return out, nil
+	}
+	d, err := lookup(addr)
+	if err != nil {
+		return out, toErr(err)
+	}
+	out.Port, out.KeyFile = d.Port, d.KeyFile
+	out.IdentitiesOnly, out.IdentitiesOnlySet = d.IdentitiesOnly, d.IdentitiesOnlySet
+	if d.Warnings != nil {
+		out.Warnings = d.Warnings
+	}
+	return out, nil
 }
 
 // RecordingInfo 為記錄檔的說明區內容與起訖時刻.

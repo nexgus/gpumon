@@ -56,10 +56,6 @@ func DefaultTiming() Timing {
 	}
 }
 
-// UserResolver 回傳 ~/.ssh/config 為位址 addr 設定的使用者名稱, 無設定時回傳
-// 空字串.
-type UserResolver func(addr string) (string, error)
-
 // Options 為 Manager 的設定.
 type Options struct {
 	// DataDir 為應用程式資料目錄, 記錄檔位於其下的 history/.
@@ -71,9 +67,6 @@ type Options struct {
 	Dialer Dialer
 	// Notifier 接收通知; nil 時捨棄通知.
 	Notifier Notifier
-	// ResolveUser 解析使用者名稱留空時的實際使用者名稱; nil 時視為
-	// ~/.ssh/config 皆無設定.
-	ResolveUser UserResolver
 	// Logger 為日誌; nil 時使用 slog.Default.
 	Logger *slog.Logger
 	// Now 為本機時鐘, 用於時間基準; nil 時使用 time.Now.
@@ -88,7 +81,6 @@ type Manager struct {
 	store     *settings.Store
 	dialer    Dialer
 	notify    Notifier
-	resolve   UserResolver
 	log       *slog.Logger
 	now       func() time.Time
 	timing    Timing
@@ -110,7 +102,6 @@ func New(opts Options) *Manager {
 		store:    opts.Settings,
 		dialer:   opts.Dialer,
 		notify:   opts.Notifier,
-		resolve:  opts.ResolveUser,
 		log:      opts.Logger,
 		now:      opts.Now,
 		timing:   opts.Timing,
@@ -121,9 +112,6 @@ func New(opts Options) *Manager {
 	}
 	if m.notify == nil {
 		m.notify = NotifierFunc(func(string, any) {})
-	}
-	if m.resolve == nil {
-		m.resolve = func(string) (string, error) { return "", nil }
 	}
 	if m.log == nil {
 		m.log = slog.Default()
@@ -157,32 +145,14 @@ func (m *Manager) sessionLocked(id string) *session {
 	return s
 }
 
-// nameOf 回傳主機的顯示名稱 "實際使用者名稱@位址". 實際使用者名稱無法解析時
-// 回傳 ok 為假.
-func (m *Manager) nameOf(c settings.HostConn) (string, bool, error) {
-	user := c.User
-	if user == "" {
-		u, err := m.resolve(c.Addr)
-		if err != nil {
-			return "", false, err
-		}
-		user = u
-	}
-	if user == "" {
-		return "", false, nil
-	}
-	return user + "@" + c.Addr, true, nil
-}
-
-// displayName 回傳主機的顯示名稱. 使用者名稱留空而無法解析時, 取最近一次連線
-// 實際登入的使用者名稱, 仍沒有時回傳 ID.
+// displayName 回傳主機的顯示名稱, 即主機的識別. 使用者名稱空白 (舊版設定檔升級後
+// 仍無使用者名稱) 時, 取最近一次連線實際登入的使用者名稱, 仍沒有時回傳 ID.
 func (m *Manager) displayName(h settings.Host, s *session) string {
-	if name, ok, err := m.nameOf(h.HostConn); err == nil && ok {
-		return name
-	}
-	if s != nil {
+	if h.User == "" && s != nil {
 		if u := s.lastUser(); u != "" {
-			return u + "@" + h.Addr
+			c := h.HostConn
+			c.User = u
+			return c.ID()
 		}
 	}
 	return h.ID()
@@ -225,40 +195,25 @@ func (m *Manager) status(h settings.Host, s *session) HostStatus {
 	return st
 }
 
-// checkHost 檢查主機表單並解析顯示名稱; skip 為編輯中主機的 ID, 不與自己比對.
+// checkHost 檢查主機表單; skip 為編輯中主機的 ID, 不與自己比對.
 func (m *Manager) checkHost(c settings.HostConn, skip string) error {
-	c.Addr = strings.TrimSpace(c.Addr)
-	c.User = strings.TrimSpace(c.User)
+	c = normalized(c)
 	if c.Addr == "" {
 		return newErr(CodeInvalid, "The address is required")
 	}
-	name, ok, err := m.nameOf(c)
-	if err != nil {
-		return newErr(CodeFailed, "Cannot read the SSH configuration: %v", err)
+	if c.User == "" {
+		return newErr(CodeUserRequired, "The user name is required for %s", c.Addr)
 	}
-	if !ok {
-		return newErr(CodeUserRequired, "No user name is specified for %s in the form or in the SSH configuration", c.Addr)
-	}
-	key := nameKey(name)
+	key := c.Key()
 	for _, h := range m.store.Hosts() {
 		if h.ID() == skip {
 			continue
 		}
-		other, ok, err := m.nameOf(h.HostConn)
-		if err != nil || !ok {
-			other = h.ID()
-		}
-		if nameKey(other) == key {
-			return newErr(CodeDuplicate, "%s already exists", name)
+		if h.Key() == key {
+			return newErr(CodeDuplicate, "%s already exists", c.ID())
 		}
 	}
 	return nil
-}
-
-// nameKey 回傳比對主機是否相同所用的鍵. 位址不分大小寫, 使用者名稱區分大小寫.
-func nameKey(name string) string {
-	user, addr, _ := strings.Cut(name, "@")
-	return user + "@" + strings.ToLower(addr)
 }
 
 func settingsErr(err error) error {
@@ -275,8 +230,8 @@ func settingsErr(err error) error {
 	return newErr(CodeFailed, "%v", err)
 }
 
-// AddHost 新增主機. 使用者名稱留空且 ~/.ssh/config 無設定時回傳 CodeUserRequired,
-// 與既有主機的 "實際使用者名稱@位址" 相同時回傳 CodeDuplicate.
+// AddHost 新增主機. 使用者名稱空白時回傳 CodeUserRequired, 與既有主機相同 (位址不分
+// 大小寫, 使用者名稱區分大小寫, 連接埠 0 與 22 視為相同) 時回傳 CodeDuplicate.
 func (m *Manager) AddHost(c settings.HostConn) (HostStatus, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

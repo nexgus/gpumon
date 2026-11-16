@@ -9,11 +9,7 @@ import { useStore } from "../state/store";
 function UploadForm({ notice }: { notice: UploadNotice }) {
   const t = useT();
   const host = <span className="mono strong">{notice.name || notice.host}</span>;
-  const text = notice.update
-    ? notice.same_version
-      ? "upload.updateSameText"
-      : "upload.updateText"
-    : "upload.uploadText";
+  const text = notice.update ? "upload.updateText" : "upload.uploadText";
   return (
     <Dialog
       title={t(notice.update ? "upload.updateTitle" : "upload.uploadTitle")}

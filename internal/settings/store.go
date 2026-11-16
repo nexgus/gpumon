@@ -65,6 +65,7 @@ func load(path string) (Data, error) {
 	}
 
 	applyLegacyRanges(&d, top, raw)
+	markLegacyHosts(&d, top["hosts"])
 
 	var notice error
 	if d.Version > CurrentVersion {
@@ -195,7 +196,7 @@ func findHost(d *Data, id string) int {
 
 func findDuplicate(d *Data, c HostConn, skip int) bool {
 	for i, h := range d.Hosts {
-		if i != skip && h.key() == c.key() {
+		if i != skip && h.Key() == c.Key() {
 			return true
 		}
 	}
@@ -235,7 +236,7 @@ func (s *Store) AddHost(c HostConn) error {
 	})
 }
 
-// UpdateHost 編輯識別字串為 id 的主機. 只更換表單的四個欄位, 排列位置, 收合狀態
+// UpdateHost 編輯識別字串為 id 的主機. 只更換表單的欄位, 排列位置, 收合狀態
 // 與程序卡片的排序方式及過濾條件皆保留; 識別改變時, 免密碼登入的不再詢問清除.
 // 新識別與其他主機重複時回傳 ErrDuplicateHost.
 func (s *Store) UpdateHost(id string, c HostConn) error {

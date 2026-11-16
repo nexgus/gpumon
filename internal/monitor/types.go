@@ -27,8 +27,9 @@ const (
 type HostStatus struct {
 	// ID 為主機於設定檔中的識別字串, 呼叫本套件的其他方法時以此指定主機.
 	ID string `json:"id"`
-	// Name 為畫面顯示的名稱 "實際使用者名稱@位址", 亦為記錄檔的 host 成員.
-	// 實際使用者名稱無法解析時為 ID.
+	// Name 為畫面顯示的名稱, 即主機的識別 ("使用者名稱@位址", 連接埠不是 22 時另附
+	// ":連接埠"), 亦為記錄檔的 host 成員. 使用者名稱空白時取最近一次登入的使用者名稱,
+	// 仍沒有時為 ID.
 	Name string `json:"name"`
 	settings.Host
 	State State `json:"state"`
@@ -124,9 +125,6 @@ type UploadNotice struct {
 	// 為空字串; NewHash 為即將上傳的內容雜湊值.
 	RemoteHash string `json:"remote_hash"`
 	NewHash    string `json:"new_hash"`
-	// SameVersion 為真表示更新的原因是兩者程式版號相同而內容不同, 為假表示遠端的
-	// 程式版號較低.
-	SameVersion bool `json:"same_version"`
 }
 
 // UploadClosed 為上傳通知已失效的通知內容, 例如等待確認期間使用者按下中斷連線或
@@ -313,9 +311,9 @@ const (
 	CodeInvalid Code = "invalid"
 	// CodeNotFound 為找不到指定的主機, 記錄檔, 輸入要求, 上傳通知或詢問.
 	CodeNotFound Code = "not-found"
-	// CodeDuplicate 為已有相同 "實際使用者名稱@位址" 的主機.
+	// CodeDuplicate 為已有相同的主機: 位址 (不分大小寫), 使用者名稱與連接埠 (0 與 22 視為相同) 皆相同.
 	CodeDuplicate Code = "duplicate"
-	// CodeUserRequired 為使用者名稱留空且 ~/.ssh/config 未設定使用者名稱.
+	// CodeUserRequired 為主機表單的使用者名稱空白.
 	CodeUserRequired Code = "user-required"
 	// CodeBusy 為主機處於正在連線, 連線中或重新連線中, 不可編輯或刪除.
 	CodeBusy Code = "busy"

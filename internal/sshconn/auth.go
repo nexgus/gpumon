@@ -143,7 +143,7 @@ func loadKeyFiles(paths []string) []localKey {
 }
 
 // onlyFileKeys 回傳 agent 中公鑰與 files 之一相同的金鑰, 順序不變. 用於
-// ~/.ssh/config 把 IdentitiesOnly 設為 yes 的主機.
+// 主機表單的 IdentitiesOnly 為真的主機.
 func onlyFileKeys(agent []ssh.Signer, files []localKey) []ssh.Signer {
 	want := map[string]bool{}
 	for _, f := range files {

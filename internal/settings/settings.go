@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -207,35 +208,64 @@ type Window struct {
 	Y           int  `json:"y"`
 }
 
-// HostConn 為主機表單的四個欄位.
+// HostConn 為主機表單的欄位.
 type HostConn struct {
 	// Addr 為必填, 可為主機名稱, IP 位址或 ~/.ssh/config 的 Host 名稱.
 	Addr string `json:"addr"`
-	// Port 為 0 時表示留空.
+	// Port 為 0 時表示留空, 以 22 連線.
 	Port int `json:"port"`
-	// User 留空時表示取 ~/.ssh/config 的設定.
+	// User 為必填. 只有舊版設定檔升級後仍無使用者名稱的主機為空字串, 這類主機
+	// 連線時回傳錯誤.
 	User string `json:"user"`
-	// KeyFile 留空時表示取 ~/.ssh/config 的設定或預設金鑰.
+	// KeyFile 留空時表示只用預設名稱的金鑰檔.
 	KeyFile string `json:"key_file"`
+	// IdentitiesOnly 為真時, ssh-agent 的金鑰只保留與金鑰檔相同者, 意義與
+	// OpenSSH 的 IdentitiesOnly 相同.
+	IdentitiesOnly bool `json:"identities_only"`
 }
 
 // Host 為一台主機的設定. 舊版設定檔中各主機的 interval_ms 與 range 讀取時略過.
 type Host struct {
 	HostConn
+	// legacy 表示讀自設定檔且 JSON 中沒有 identities_only 成員的舊版主機, 待
+	// UpgradeLegacyHosts 依 ~/.ssh/config 填入空白的欄位.
+	legacy bool
 }
 
-// ID 回傳主機的識別字串. 使用者名稱非空時為 user@addr; 留空時只有位址,
-// 因使用者名稱要到連線時才由 ~/.ssh/config 解析.
+// ID 回傳主機的識別字串, 亦為顯示名稱與記錄檔的 host 成員. 連接埠為 0 或 22 時為
+// "使用者名稱@位址", 其他連接埠為 "使用者名稱@位址:連接埠"; 位址含 ':' (IPv6) 而需
+// 附連接埠時, 位址以方括號括住. 使用者名稱空白時省略 "使用者名稱@".
 func (h HostConn) ID() string {
+	addr := h.Addr
+	if h.Port != 0 && h.Port != 22 {
+		if strings.Contains(addr, ":") {
+			addr = "[" + addr + "]"
+		}
+		addr += ":" + strconv.Itoa(h.Port)
+	}
+	if h.User == "" {
+		return addr
+	}
+	return h.User + "@" + addr
+}
+
+// Key 回傳判定兩台主機是否相同所用的鍵. 位址不分大小寫, 使用者名稱區分大小寫,
+// 連接埠列入比對, 0 與 22 視為相同.
+func (h HostConn) Key() string {
+	port := h.Port
+	if port == 0 {
+		port = 22
+	}
+	return h.User + "@" + strings.ToLower(h.Addr) + ":" + strconv.Itoa(port)
+}
+
+// legacyID 回傳舊版的識別字串: 使用者名稱非空時為 user@addr, 留空時只有位址,
+// 皆不含連接埠. 舊版設定檔中的收合狀態等以此為鍵.
+func (h HostConn) legacyID() string {
 	if h.User == "" {
 		return h.Addr
 	}
 	return h.User + "@" + h.Addr
-}
-
-// key 回傳用於判定重複的鍵. 主機名稱不分大小寫, 使用者名稱分大小寫.
-func (h HostConn) key() string {
-	return h.User + "@" + strings.ToLower(h.Addr)
 }
 
 // Data 為完整的設定內容, 亦為設定檔的 JSON 結構.
@@ -383,13 +413,13 @@ func (d *Data) sanitize() {
 		h.Addr = strings.TrimSpace(h.Addr)
 		h.User = strings.TrimSpace(h.User)
 		h.KeyFile = strings.TrimSpace(h.KeyFile)
-		if validateIdentity(h.HostConn) != nil || seenHost[h.key()] {
-			continue
-		}
-		seenHost[h.key()] = true
 		if h.Port < 0 || h.Port > 65535 {
 			h.Port = 0
 		}
+		if validateIdentity(h.HostConn) != nil || seenHost[h.Key()] {
+			continue
+		}
+		seenHost[h.Key()] = true
 		hosts = append(hosts, h)
 	}
 	d.Hosts = hosts

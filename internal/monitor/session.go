@@ -329,7 +329,7 @@ func (s *session) auth(ctx context.Context, reconnect bool) Auth {
 		return s.m.uploads.ask(uctx, UploadNotice{
 			Host: s.id, Name: name, Path: uploadPath,
 			Update: req.Update, RemoteVersion: req.RemoteVersion, NewVersion: req.NewVersion,
-			RemoteHash: req.RemoteHash, NewHash: req.NewHash, SameVersion: req.SameVersion,
+			RemoteHash: req.RemoteHash, NewHash: req.NewHash,
 		})
 	}
 	if reconnect {
@@ -506,6 +506,10 @@ func (s *session) connect(ctx context.Context, reconnect bool) (*conn, error) {
 	if !ok {
 		return nil, &checkError{kind: ErrConfig, msg: fmt.Sprintf("Host %s no longer exists", s.id)}
 	}
+	if h.User == "" {
+		return nil, &checkError{kind: ErrConfig, msg: fmt.Sprintf(
+			"No user name is specified for %s. Edit the host and enter a user name", h.Addr)}
+	}
 	timeout := s.m.timing.ConnectTimeout
 	if reconnect {
 		timeout = s.m.timing.ReconnectTimeout
@@ -624,10 +628,12 @@ func (s *session) serve(ctx context.Context, c *conn, disc *disconnect) string {
 
 	user := link.User()
 	h, _ := s.m.store.Host(s.id)
-	name := h.Addr
+	// name 為記錄檔的 host 成員, 即以實際登入的使用者名稱組成的主機識別.
+	hc := h.HostConn
 	if user != "" {
-		name = user + "@" + h.Addr
+		hc.User = user
 	}
+	name := hc.ID()
 	s.mu.Lock()
 	s.st, s.reason, s.retries, s.retryErr = StateConnected, "", 0, ""
 	s.user = user

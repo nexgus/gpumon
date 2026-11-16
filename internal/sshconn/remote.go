@@ -79,9 +79,6 @@ type UploadRequest struct {
 	RemoteHash string
 	// NewHash 為即將上傳的內容雜湊值, 即 GUI 的內容雜湊值.
 	NewHash string
-	// SameVersion 為真表示更新的原因是兩者程式版號相同而內容不同, 為假表示遠端的
-	// 程式版號低於 GUI; 首次上傳時為假.
-	SameVersion bool
 }
 
 // UnknownHash 為遠端沒有內容雜湊值時, UploadRequest.RemoteHash 的值.
@@ -199,7 +196,6 @@ func (c *Client) Deploy(ctx context.Context, opts DeployOptions) (*Deployment, e
 			}
 			if dep.Remote != nil {
 				req.RemoteVersion = dep.Remote.Version.String()
-				req.SameVersion = dep.Remote.Version.Compare(guiVer) == 0
 				req.RemoteHash = dep.Remote.Hash
 				if req.RemoteHash == "" {
 					req.RemoteHash = UnknownHash
@@ -670,17 +666,17 @@ func Connect(ctx context.Context, cfg Config, opts DeployOptions, intervalMs int
 	opts = opts.withDefaults()
 	if err := c.OfferKeySetup(ctx, opts.CommandTimeout); err != nil {
 		c.Close()
-		return nil, nil, nil, err
+		return nil, nil, nil, c.configNote(err)
 	}
 	dep, err := c.Deploy(ctx, opts)
 	if err != nil {
 		c.Close()
-		return nil, nil, nil, err
+		return nil, nil, nil, c.configNote(err)
 	}
 	p, err := c.Start(ctx, dep, intervalMs)
 	if err != nil {
 		c.Close()
-		return nil, nil, nil, err
+		return nil, nil, nil, c.configNote(err)
 	}
 	return c, dep, p, nil
 }

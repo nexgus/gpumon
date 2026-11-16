@@ -4,7 +4,7 @@
 //   collapse=1 (收合 GPU 2), pcollapse=1 (收合第一台主機的程序卡片), mcollapse=1 (收合第一台主機
 //   的最大值卡片), host=<n> (切換至第 n 個主機分頁, 自 0 起), exhaust=1 (一秒後 alice@gpu-lab-02 由
 //   重新連線中因重試用盡轉為未連線), scenario=design|empty|nogpu, live=0 (不送新取樣),
-//   now=<Unix 秒> (固定目前時刻), dialog=add|edit|delete|password|passphrase|hostkey|hostkeychanged|keysetup|keyresult|errors|upload|update|updatesame|queue
+//   now=<Unix 秒> (固定目前時刻), dialog=add|edit|delete|password|passphrase|hostkey|hostkeychanged|keysetup|keyresult|errors|upload|update|queue
 //   (keyresult 另可傳 outcome=success|generate-failed|append-failed 與 generated=1),
 //   (queue 依序送出上傳通知, 錯誤與密碼輸入要求, 只顯示第一個; next=<n> 依序按下前 n 個視窗的主要按鍵),
 //   hover=<0 至 1> (於第 n 張曲線圖的該位置懸停, 歷史畫面中靠近 0 或 1 即位於邊緣區), hoverChart=<n>, pin=<0 至 1> (於第 n 張曲線圖
@@ -13,7 +13,7 @@
 //   處於顯示全部狀態),
 //   rhost=<n> (進入記錄檔第一層第 n 列的第二層, 自 0 起; 指定 select, openrec, confirmdelete 或
 //   page=history 而未指定時為 0), select=all|<第二層由上而下的列號, 以逗號分隔, 自 0 起> (選取), openrec=1 (按 Open,
-//   顯示歷史畫面), confirmdelete=1 (按 Delete, 顯示確認視窗), dialog=quit (結束確認視窗, count=<主機數>, 預設 2),
+//   顯示歷史畫面), confirmdelete=1 (按 Delete, 顯示確認視窗), dialog=quit (結束確認視窗),
 //   window=about (關於視窗, 以 600 x 600 的視窗檢視; tab=about|licenses,
 //   platform=windows 顯示 Windows 的資訊, jump=<n> 點選第三方授權分頁表中第 n 個授權種類),
 //   pins=1 (第一台主機的程序卡片預先置頂兩列, 其中一列為不在程序清單中的程序).
@@ -48,18 +48,17 @@ function setInput(selector: string, value: string): void {
   el.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-function uploadNotice(id: string, host: string, update: boolean, sameVersion = false) {
+function uploadNotice(id: string, host: string, update: boolean) {
   return {
     id,
     host,
     name: host,
     path: "~/.gpumon/gpumon",
     update,
-    remote_version: update ? (sameVersion ? "0.2.0-beta.1" : "0.1.0") : "",
+    remote_version: update ? "0.1.0" : "",
     new_version: update ? "0.2.0-beta.1" : "0.1.0",
     remote_hash: update ? "2d46bd4" : "",
     new_hash: "88a8abd",
-    same_version: update && sameVersion,
   };
 }
 
@@ -152,10 +151,9 @@ function scenario(): void {
     }
     case "upload":
     case "update":
-    case "updatesame":
       mock.emit(
         "monitor:upload",
-        uploadNotice("u1", "sweetener@10.90.20.55", params.get("dialog") !== "upload", params.get("dialog") === "updatesame"),
+        uploadNotice("u1", "sweetener@10.90.20.55", params.get("dialog") !== "upload"),
       );
       break;
     case "queue":
@@ -182,7 +180,7 @@ function scenario(): void {
       }
       break;
     case "quit":
-      mock.emit("app:quit-request", { count: Number(params.get("count") ?? 2) });
+      mock.emit("app:quit-request", {});
       break;
     case "errors":
       mock.emit("monitor:error", {

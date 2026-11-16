@@ -496,6 +496,13 @@ func TestHostDirName(t *testing.T) {
 		"user@fe80::1%eth0": "user@fe80__1_eth0",
 		"使用者@host":          "___@host",
 		"a_b-c.d":           "a_b-c.d",
+		"alice@host:2222":   "alice@host+2222",
+		"alice@[::1]:2222":  "alice@___1_+2222",
+		"alice@::1":         "alice@__1",
+		"alice@fe80::1:22":  "alice@fe80__1_22",
+		"host:2222":         "host+2222",
+		"alice@host:":       "alice@host_",
+		"alice@host:22a":    "alice@host_22a",
 	}
 	for in, want := range cases {
 		if got := HostDirName(in); got != want {

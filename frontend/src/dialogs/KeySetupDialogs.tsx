@@ -45,10 +45,7 @@ export function KeySetupDialog() {
 function KeyResultForm({ result }: { result: KeyResultNotice }) {
   const t = useT();
   const close = () => dismissKeyResult(result.id);
-  const params = {
-    host: <span className="mono strong">{result.name || result.host}</span>,
-    keyFile: <span className="mono strong">{result.key_file}</span>,
-  };
+  const host = <span className="mono strong">{result.name || result.host}</span>;
   const key =
     result.outcome === "success"
       ? "keyResult.success"
@@ -58,9 +55,11 @@ function KeyResultForm({ result }: { result: KeyResultNotice }) {
   const failed = result.outcome !== "success";
   return (
     <Dialog title={t("keySetup.title")} width={420} onCancel={close} onSubmit={close}>
-      <p className="dialog-text">{t.rich(key, params)}</p>
+      <p className="dialog-text">{t.rich(key, { host })}</p>
       {result.generated && result.outcome !== "generate-failed" && (
-        <p className="dialog-text">{t("keyResult.generated")}</p>
+        <p className="dialog-text">
+          {t.rich("keyResult.generated", { keyFile: <span className="mono strong">{result.key_file}</span> })}
+        </p>
       )}
       {failed && result.reason && <span className="error-detail">{result.reason}</span>}
       <DialogButtons>

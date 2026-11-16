@@ -14,10 +14,18 @@ import (
 	"unicode/utf8"
 )
 
-// HostDirName 將 user@addr 轉為主機目錄名稱, 不屬於英文字母, 數字, `.`, `_`, `@`, `-` 的字元逐一換成 `_`.
+// HostDirName 將主機識別 ("user@addr" 或 "user@addr:port") 轉為主機目錄名稱, 不屬於英文
+// 字母, 數字, `.`, `_`, `@`, `-` 的字元逐一換成 `_`. 結尾為連接埠時, 連接埠之前的 `:`
+// 改為 `+`, 例如 `user@host:2222` 為 `user@host+2222`; `+` 不會由其他字元換來, 因此
+// 帶連接埠的目錄名稱不與不帶連接埠者相同. 位址含 `:` (IPv6) 而帶連接埠時, 位址以方括號
+// 括住, 例如 `user@[::1]:2222`; 不帶方括號的 IPv6 位址不視為帶連接埠.
 func HostDirName(host string) string {
+	base, port := host, ""
+	if b, p, ok := splitPortSuffix(host); ok {
+		base, port = b, p
+	}
 	var b strings.Builder
-	for _, r := range host {
+	for _, r := range base {
 		switch {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
 			r == '.', r == '_', r == '@', r == '-':
@@ -26,7 +34,31 @@ func HostDirName(host string) string {
 			b.WriteByte('_')
 		}
 	}
+	if port != "" {
+		b.WriteByte('+')
+		b.WriteString(port)
+	}
 	return b.String()
+}
+
+// splitPortSuffix 自主機識別分出結尾的連接埠. 位址部分 (最後一個 `@` 之後) 必須不含
+// `:`, 或為方括號括住的位址.
+func splitPortSuffix(host string) (base, port string, ok bool) {
+	i := strings.LastIndexByte(host, ':')
+	if i < 0 || i == len(host)-1 {
+		return "", "", false
+	}
+	for _, r := range host[i+1:] {
+		if r < '0' || r > '9' {
+			return "", "", false
+		}
+	}
+	base = host[:i]
+	addr := base[strings.LastIndexByte(base, '@')+1:]
+	if strings.Contains(addr, ":") && !(strings.HasPrefix(addr, "[") && strings.HasSuffix(addr, "]")) {
+		return "", "", false
+	}
+	return base, host[i+1:], true
 }
 
 // HostDir 回傳某主機的記錄檔目錄 `<dataDir>/history/<主機目錄>`.

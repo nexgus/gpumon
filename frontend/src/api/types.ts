@@ -40,12 +40,25 @@ export type ErrorCode =
   | "failed"
   | "closed";
 
-// HostConn 為主機表單的四個欄位. port 為 0 表示留空.
+// HostConn 為主機表單的欄位. port 為 0 表示留空 (以 22 連線); key_file 留空表示只用預設
+// 名稱的金鑰檔; identities_only 為真表示只使用 key_file 指定的金鑰檔.
 export interface HostConn {
   addr: string;
   port: number;
   user: string;
   key_file: string;
+  identities_only: boolean;
+}
+
+// SSHConfigDefaults 為 ~/.ssh/config 對某個位址的設定. port 為 0 與 key_file 為空字串
+// 表示無設定; identities_only_set 為真表示 identities_only 取自設定檔. warnings 為略過的
+// 問題, 每則一個, 為英文.
+export interface SSHConfigDefaults {
+  port: number;
+  key_file: string;
+  identities_only: boolean;
+  identities_only_set: boolean;
+  warnings: string[];
 }
 
 export interface HostStatus extends HostConn {
@@ -196,8 +209,7 @@ export interface KeySetupResult {
 
 // UploadNotice 為上傳遠端程式之前的通知. update 為真表示更新, 為假表示首次上傳;
 // remote_version 與 remote_hash 於首次上傳時為空字串; 兩個版本皆為不含內容雜湊值的
-// 程式版號, remote_hash 於遠端沒有內容雜湊值時為 unknown. same_version 為真表示更新的原因是兩者
-// 程式版號相同而內容不同. path 恆為 ~/.gpumon/gpumon.
+// 程式版號, remote_hash 於遠端沒有內容雜湊值時為 unknown. path 恆為 ~/.gpumon/gpumon.
 export interface UploadNotice {
   id: string;
   host: string;
@@ -208,7 +220,6 @@ export interface UploadNotice {
   new_version: string;
   remote_hash: string;
   new_hash: string;
-  same_version: boolean;
 }
 
 export interface UploadClosed {
@@ -440,10 +451,8 @@ export interface UISettings {
   language: Language;
 }
 
-// QuitRequest 為結束確認視窗的內容, count 為將中斷連線的主機數.
-export interface QuitRequest {
-  count: number;
-}
+// QuitRequest 為結束確認視窗的要求, 沒有內容.
+export type QuitRequest = Record<string, never>;
 
 export interface ShowPage {
   page: "settings";
@@ -495,6 +504,8 @@ export interface Backend {
   // stats 為真時, 降採樣的結果另附 counts, sum 與 count, 見 QueryResult.
   query(id: string, from: number, to: number, width: number, fields: Field[], stats: boolean): Promise<QueryResult | null>;
   chooseKeyFile(title: string): Promise<string>;
+  // sshConfigDefaults 查詢 ~/.ssh/config 對該位址的設定, 供主機表單預填.
+  sshConfigDefaults(addr: string): Promise<SSHConfigDefaults>;
 
   recordings(): Promise<RecordingListing>;
   deleteRecordings(paths: string[]): Promise<DeleteResult[]>;

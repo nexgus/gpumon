@@ -260,7 +260,6 @@ type env struct {
 	events *eventLog
 	clock  *fakeClock
 	m      *Manager
-	users  map[string]string
 }
 
 func newEnv(t *testing.T, timing Timing) *env {
@@ -270,12 +269,11 @@ func newEnv(t *testing.T, timing Timing) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := &env{t: t, dir: dir, store: store, dialer: &fakeDialer{}, events: &eventLog{}, clock: &fakeClock{}, users: map[string]string{}}
+	e := &env{t: t, dir: dir, store: store, dialer: &fakeDialer{}, events: &eventLog{}, clock: &fakeClock{}}
 	e.clock.set(1_730_700_000_000_000)
 	e.m = New(Options{
 		DataDir: dir, Settings: store, Dialer: e.dialer, Notifier: e.events, Timing: timing,
 		Now: e.clock.now, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		ResolveUser: func(addr string) (string, error) { return e.users[addr], nil },
 	})
 	t.Cleanup(e.m.Close)
 	return e

@@ -109,11 +109,12 @@ func TestKeySetupGeneratesKey(t *testing.T) {
 
 func TestKeySetupGeneratesAtConfiguredPath(t *testing.T) {
 	f := newKeySetupFixture(t)
+	// ~/.ssh/config 的 IdentityFile 不再參考, 主機表單未指定金鑰檔時產生於 ~/.ssh/id_ed25519.
 	writeFile(t, f.env.config, "Host *\n  IdentityFile ~/cfg/first\n  IdentityFile ~/cfg/second\n", 0o600)
 	if err := f.run(t); err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(f.env.home, "cfg", "first")
+	want := filepath.Join(f.env.sshDir, "id_ed25519")
 	if len(f.results) != 1 || f.results[0].KeyFile != want || f.results[0].Outcome != KeySetupSucceeded {
 		t.Fatalf("results = %+v", f.results)
 	}
@@ -121,7 +122,7 @@ func TestKeySetupGeneratesAtConfiguredPath(t *testing.T) {
 		t.Errorf("key directory: %v %v", st, err)
 	}
 
-	// 主機表單的金鑰檔優先.
+	// 主機表單指定金鑰檔時產生於該處, 所在目錄不存在時以 0700 建立.
 	f2 := newKeySetupFixture(t)
 	writeFile(t, f2.env.config, "Host *\n  IdentityFile ~/cfg/first\n", 0o600)
 	f2.cfg.KeyFile = filepath.Join(f2.env.home, "form", "key")
@@ -136,9 +137,9 @@ func TestKeySetupGeneratesAtConfiguredPath(t *testing.T) {
 func TestKeySetupUsesExistingKey(t *testing.T) {
 	f := newKeySetupFixture(t)
 	// 第一個金鑰檔有密碼保護, 未獲遠端接受, 不要求金鑰密碼.
-	genKey(t, filepath.Join(f.env.home, "keys", "a"), "secret", true)
-	genKey(t, filepath.Join(f.env.home, "keys", "b"), "", true)
-	writeFile(t, f.env.config, "Host *\n  IdentityFile ~/keys/missing\n  IdentityFile ~/keys/a\n  IdentityFile ~/keys/b\n", 0o600)
+	// 預設名稱的金鑰檔依 id_rsa, id_ecdsa, id_ed25519 的順序列出, 不存在的 id_ecdsa 略過.
+	genKey(t, filepath.Join(f.env.sshDir, "id_rsa"), "secret", true)
+	genKey(t, filepath.Join(f.env.sshDir, "id_ed25519"), "", true)
 	f.cfg.Passphrase = func(context.Context, PassphraseRequest) ([]byte, error) {
 		t.Error("passphrase requested")
 		return nil, ErrCanceled
@@ -149,7 +150,7 @@ func TestKeySetupUsesExistingKey(t *testing.T) {
 	if err := f.run(t); err != nil {
 		t.Fatal(err)
 	}
-	keyA := filepath.Join(f.env.home, "keys", "a")
+	keyA := filepath.Join(f.env.sshDir, "id_rsa")
 	if len(f.results) != 1 || f.results[0].Generated || f.results[0].KeyFile != keyA {
 		t.Fatalf("results = %+v", f.results)
 	}

@@ -3,6 +3,7 @@ package sshconn
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -27,43 +28,71 @@ type hostConfig struct {
 // maxIncludeDepth 與 OpenSSH 的 READCONF_MAX_DEPTH 相同.
 const maxIncludeDepth = 16
 
+// maxConfigLine 為設定檔單行的長度上限, 超過時該檔案其後的內容略過.
+const maxConfigLine = 1 << 20
+
 // configParser 依 OpenSSH 的規則, 針對單一 Host 名稱讀取設定檔. 每個設定項目以
 // 第一個取得的值為準, IdentityFile 則累積所有值.
 //
 // 與 OpenSSH 相同, 相對路徑的 Include 以使用者設定檔所在目錄 (正式環境即
 // ~/.ssh) 為基準, ~ 展開為家目錄. Match 區塊不支援, 其中的設定一律忽略.
+//
+// 設定檔只作參考, 不要求完全正確: 有錯誤的行與讀不到的 Include 略過, 其餘照常
+// 使用, 每個略過之處於 warnings 加入一則英文警告.
 type configParser struct {
-	alias   string
-	home    string
-	baseDir string
-	cfg     hostConfig
+	alias    string
+	home     string
+	baseDir  string
+	cfg      hostConfig
+	warnings []string
 }
 
-// loadHostConfig 讀取 configPath 中適用於 alias 的設定. 設定檔不存在時回傳空設定.
-func loadHostConfig(configPath, alias, home string) (hostConfig, error) {
-	p := &configParser{alias: alias, home: home, baseDir: filepath.Dir(configPath)}
+// loadHostConfig 讀取 configPath 中適用於 alias 的設定, 並回傳略過之處的英文警告.
+// 設定檔不存在時回傳空設定且沒有警告; 存在但讀不到時視為沒有設定, 並回傳一則警告.
+// 本函數不回傳錯誤, 回傳的警告不為 nil.
+func loadHostConfig(configPath, alias, home string) (hostConfig, []string) {
+	p := &configParser{alias: alias, home: home, baseDir: filepath.Dir(configPath), warnings: []string{}}
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return hostConfig{}, nil
+		if !errors.Is(err, os.ErrNotExist) {
+			p.warn("Ignored %s because it cannot be read: %v", p.display(configPath), err)
 		}
-		return hostConfig{}, err
+		return hostConfig{}, p.warnings
 	}
-	if err := p.parse(configPath, data, false, 0); err != nil {
-		return hostConfig{}, err
+	p.parse(configPath, data, false, 0)
+	return p.cfg, p.warnings
+}
+
+func (p *configParser) warn(format string, args ...any) {
+	p.warnings = append(p.warnings, fmt.Sprintf(format, args...))
+}
+
+// display 回傳警告中顯示的檔案路徑.
+func (p *configParser) display(name string) string {
+	return displayPath(name, p.home)
+}
+
+// displayPath 把位於 home 之下的路徑改以 ~ 開頭表示, 其餘原樣回傳.
+func displayPath(name, home string) string {
+	if home == "" {
+		return name
 	}
-	return p.cfg, nil
+	rel, err := filepath.Rel(home, name)
+	if err != nil || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return name
+	}
+	if rel == "." {
+		return "~"
+	}
+	return "~" + string(filepath.Separator) + rel
 }
 
 // parse 處理一個設定檔的內容. neverMatch 為真時, 檔中的 Host 一律不符合, 對應
 // OpenSSH 在不適用的 Host 區塊中遇到 Include 的處理方式.
-func (p *configParser) parse(name string, data []byte, neverMatch bool, depth int) error {
-	if depth > maxIncludeDepth {
-		return fmt.Errorf("%s: too many nested Include directives", name)
-	}
+func (p *configParser) parse(name string, data []byte, neverMatch bool, depth int) {
 	active := !neverMatch
 	sc := bufio.NewScanner(bytes.NewReader(data))
-	sc.Buffer(make([]byte, 0, 4096), 1<<20)
+	sc.Buffer(make([]byte, 0, 4096), maxConfigLine)
 	lineNo := 0
 	for sc.Scan() {
 		lineNo++
@@ -71,12 +100,14 @@ func (p *configParser) parse(name string, data []byte, neverMatch bool, depth in
 		if !ok {
 			continue
 		}
-		where := fmt.Sprintf("%s line %d", name, lineNo)
 		switch keyword {
 		case "host":
 			args, err := splitArgs(rest)
 			if err != nil {
-				return fmt.Errorf("%s: %w", where, err)
+				// 無法確定此區塊適用哪些主機, 區塊內的設定一律不採用.
+				p.warn("Skipped line %d of %s: %v", lineNo, p.display(name), err)
+				active = false
+				continue
 			}
 			active = !neverMatch && hostMatches(p.alias, args)
 		case "match":
@@ -84,33 +115,42 @@ func (p *configParser) parse(name string, data []byte, neverMatch bool, depth in
 		case "include":
 			args, err := splitArgs(rest)
 			if err != nil {
-				return fmt.Errorf("%s: %w", where, err)
+				p.warn("Skipped line %d of %s: %v", lineNo, p.display(name), err)
+				continue
 			}
 			for _, arg := range args {
-				if err := p.include(arg, !active, depth); err != nil {
-					return fmt.Errorf("%s: %w", where, err)
-				}
+				p.include(arg, !active, depth, name, lineNo)
 			}
 		default:
 			if !active {
 				continue
 			}
 			if err := p.apply(keyword, rest); err != nil {
-				return fmt.Errorf("%s: %w", where, err)
+				p.warn("Skipped line %d of %s: %v", lineNo, p.display(name), err)
 			}
 		}
 	}
-	return sc.Err()
+	if err := sc.Err(); err != nil {
+		p.warn("Skipped the rest of %s after line %d: %v", p.display(name), lineNo, err)
+	}
 }
 
-func (p *configParser) include(pattern string, neverMatch bool, depth int) error {
+// include 處理 Include 的一個參數. 讀不到的檔案與超過巢狀層數上限的 Include 略過.
+// from 與 lineNo 為 Include 所在的檔案與行號, 供警告使用.
+func (p *configParser) include(pattern string, neverMatch bool, depth int, from string, lineNo int) {
+	where := fmt.Sprintf("the Include on line %d of %s", lineNo, p.display(from))
+	if depth+1 > maxIncludeDepth {
+		p.warn("Skipped %s: Include directives are nested more than %d levels deep", where, maxIncludeDepth)
+		return
+	}
 	pattern = expandTilde(pattern, p.home)
 	if !filepath.IsAbs(pattern) {
 		pattern = filepath.Join(p.baseDir, pattern)
 	}
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
-		return err
+		p.warn("Skipped %s: invalid pattern %q", where, pattern)
+		return
 	}
 	for _, m := range matches {
 		st, err := os.Stat(m)
@@ -119,19 +159,21 @@ func (p *configParser) include(pattern string, neverMatch bool, depth int) error
 		}
 		data, err := os.ReadFile(m)
 		if err != nil {
-			return err
+			p.warn("Skipped %s for %s: %v", where, p.display(m), err)
+			continue
 		}
-		if err := p.parse(m, data, neverMatch, depth+1); err != nil {
-			return err
-		}
+		p.parse(m, data, neverMatch, depth+1)
 	}
-	return nil
+}
+
+// canonicalKeyword 為警告中顯示的關鍵字寫法.
+var canonicalKeyword = map[string]string{
+	"hostname": "HostName", "user": "User", "port": "Port",
+	"identityfile": "IdentityFile", "identitiesonly": "IdentitiesOnly",
 }
 
 func (p *configParser) apply(keyword, rest string) error {
-	switch keyword {
-	case "hostname", "user", "port", "identityfile", "identitiesonly":
-	default:
+	if _, ok := canonicalKeyword[keyword]; !ok {
 		return nil
 	}
 	args, err := splitArgs(rest)
@@ -139,7 +181,7 @@ func (p *configParser) apply(keyword, rest string) error {
 		return err
 	}
 	if len(args) == 0 {
-		return fmt.Errorf("missing argument for %s", keyword)
+		return fmt.Errorf("missing argument for %s", canonicalKeyword[keyword])
 	}
 	v := args[0]
 	switch keyword {
@@ -219,7 +261,7 @@ func splitArgs(s string) ([]string, error) {
 		}
 	}
 	if quoted {
-		return nil, fmt.Errorf("unterminated quote")
+		return nil, errors.New("unterminated quote")
 	}
 	if inArg {
 		args = append(args, cur.String())

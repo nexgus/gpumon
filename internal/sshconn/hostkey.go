@@ -56,32 +56,33 @@ type HostKeyFunc func(ctx context.Context, req HostKeyRequest) error
 type hostKeyChecker struct {
 	own string
 	db  *knownhosts.HostKeyDB
+	// names 把資料庫所用的暫存檔名對應回原本的路徑, 供錯誤說明使用.
+	names map[string]string
 }
 
-// newHostKeyChecker 讀取兩份 known_hosts. 程式自己的檔案不存在時建立空檔案, 所在
-// 目錄不存在時一併建立. 兩份檔案無法取得檔案資訊 (例如不存在, 或建立失敗) 時
-// 視為空檔案; 存在而無法讀取或解析時回傳 KindConfig 的 *Error.
-func newHostKeyChecker(own, openssh string) (*hostKeyChecker, error) {
+// newHostKeyChecker 讀取兩份 known_hosts. 兩份檔案皆逐行處理, 無法解析的行略過, 其餘
+// 照常比對. 程式自己的檔案依 ownKnownHosts 的規則自我修正; OpenSSH 的檔案讀不到時
+// 視為空檔案, 且永不寫入. 修正過程不通知使用者, 也不回傳錯誤.
+func newHostKeyChecker(own, openssh string) *hostKeyChecker {
 	knownHostsMu.Lock()
 	defer knownHostsMu.Unlock()
-	if _, err := os.Stat(own); errors.Is(err, os.ErrNotExist) {
-		if os.MkdirAll(filepath.Dir(own), 0o700) == nil {
-			if f, err := os.OpenFile(own, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600); err == nil {
-				f.Close()
-			}
-		}
+	var sources []knownHostsSource
+	if src, ok := ownKnownHosts(own); ok {
+		sources = append(sources, src)
 	}
-	var files []string
-	for _, p := range []string{own, openssh} {
-		if _, err := os.Stat(p); err == nil {
-			files = append(files, p)
-		}
+	if src, ok := opensshKnownHosts(openssh); ok {
+		sources = append(sources, src)
 	}
-	db, err := knownhosts.NewDB(files...)
-	if err != nil {
-		return nil, newError(KindConfig, err, "Cannot read the known_hosts files")
+	db, names := openKnownHostsDB(sources, filepath.Dir(own))
+	return &hostKeyChecker{own: own, db: db, names: names}
+}
+
+// fileName 回傳資料庫中的檔名所對應的原本路徑.
+func (c *hostKeyChecker) fileName(name string) string {
+	if orig, ok := c.names[name]; ok {
+		return orig
 	}
-	return &hostKeyChecker{own: own, db: db}, nil
+	return name
 }
 
 // algorithms 回傳兩份 known_hosts 為 addr 記錄的主機金鑰種類, 供協商時優先採用,
@@ -100,7 +101,7 @@ func (c *hostKeyChecker) check(ctx context.Context, hostname string, remote net.
 	}
 	var revoked *xknownhosts.RevokedError
 	if errors.As(err, &revoked) {
-		return newError(KindHostKey, err, "The host key of %s is marked as revoked in %s", display, revoked.Revoked.Filename)
+		return newError(KindHostKey, err, "The host key of %s is marked as revoked in %s", display, c.fileName(revoked.Revoked.Filename))
 	}
 	var keyErr *xknownhosts.KeyError
 	if !errors.As(err, &keyErr) {
@@ -138,7 +139,8 @@ func (c *hostKeyChecker) check(ctx context.Context, hostname string, remote net.
 
 // record 把主機金鑰寫入程式自己的 known_hosts, 並刪除其中該主機的舊記錄. 該主機
 // 的記錄依 golang.org/x/crypto/ssh/knownhosts 的比對規則判定, 含雜湊過的主機名稱
-// 與萬用字元. 檔案與其目錄不存在時建立, 權限分別為 0600 與 0700.
+// 與萬用字元. 檔案與其目錄不存在時建立, 權限分別為 0600 與 0700. 檔案中無法解析的
+// 行一併刪除.
 func (c *hostKeyChecker) record(hostname string, remote net.Addr, key ssh.PublicKey) error {
 	knownHostsMu.Lock()
 	defer knownHostsMu.Unlock()
@@ -149,6 +151,12 @@ func (c *hostKeyChecker) record(hostname string, remote net.Addr, key ssh.Public
 	}
 	if err != nil {
 		return err
+	}
+	if kept, bad := filterKnownHosts(data, false); bad > 0 {
+		if err := replaceFile(c.own, kept); err != nil {
+			return err
+		}
+		data = kept
 	}
 	stale, err := staleLines(c.own, hostname, remote, key)
 	if err != nil {

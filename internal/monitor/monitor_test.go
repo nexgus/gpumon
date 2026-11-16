@@ -4,7 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
 	"math"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -1098,26 +1102,35 @@ func TestIntelUtilizationComputedLocally(t *testing.T) {
 
 func TestHostManagement(t *testing.T) {
 	e := newEnv(t, testTiming())
-	e.users["cfg-host"] = "bob"
 
-	st, err := e.m.AddHost(settings.HostConn{Addr: "cfg-host"})
+	st, err := e.m.AddHost(settings.HostConn{Addr: "cfg-host", User: "bob"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.ID != "cfg-host" || st.Name != "bob@cfg-host" {
-		t.Fatalf("blank user host %+v", st)
+	if st.ID != "bob@cfg-host" || st.Name != "bob@cfg-host" {
+		t.Fatalf("host %+v", st)
 	}
-	if _, err := e.m.AddHost(settings.HostConn{Addr: "nocfg"}); CodeOf(err) != CodeUserRequired {
-		t.Fatalf("blank user without config: %v", err)
+	if _, err := e.m.AddHost(settings.HostConn{Addr: "nocfg", User: "  "}); CodeOf(err) != CodeUserRequired {
+		t.Fatalf("blank user: %v", err)
 	}
-	if _, err := e.m.AddHost(settings.HostConn{Addr: "CFG-HOST", User: "bob"}); CodeOf(err) != CodeDuplicate {
-		t.Fatalf("resolved duplicate: %v", err)
+	if _, err := e.m.AddHost(settings.HostConn{Addr: "CFG-HOST", User: "bob", Port: 22}); CodeOf(err) != CodeDuplicate {
+		t.Fatalf("duplicate with port 22: %v", err)
 	}
 	if _, err := e.m.AddHost(settings.HostConn{Addr: "cfg-host", User: "Bob"}); err != nil {
 		t.Fatalf("user names are case sensitive: %v", err)
 	}
+	st, err = e.m.AddHost(settings.HostConn{Addr: "cfg-host", User: "bob", Port: 2222})
+	if err != nil || st.ID != "bob@cfg-host:2222" || st.Name != "bob@cfg-host:2222" {
+		t.Fatalf("other port is another host: %+v %v", st, err)
+	}
+	if _, err := e.m.AddHost(settings.HostConn{Addr: "CFG-host", User: "bob", Port: 2222}); CodeOf(err) != CodeDuplicate {
+		t.Fatalf("duplicate with port 2222: %v", err)
+	}
+	if err := e.m.RemoveHost(st.ID); err != nil {
+		t.Fatal(err)
+	}
 	id := e.addHost("alice", "gpu01")
-	if _, err := e.m.UpdateHost(id, settings.HostConn{Addr: "cfg-host"}); CodeOf(err) != CodeDuplicate {
+	if _, err := e.m.UpdateHost(id, settings.HostConn{Addr: "cfg-host", User: "bob"}); CodeOf(err) != CodeDuplicate {
 		t.Fatalf("edit into duplicate: %v", err)
 	}
 	if _, err := e.m.UpdateHost(id, settings.HostConn{Addr: "gpu09"}); CodeOf(err) != CodeUserRequired {
@@ -1271,5 +1284,68 @@ func TestQueryFileMax(t *testing.T) {
 	e.m.Disconnect(id)
 	if res, err = e.m.Query(ctx, id, all); err != nil || res.FileMax != nil {
 		t.Fatalf("file max while disconnected: %+v, %v", res.FileMax, err)
+	}
+}
+
+// TestRecordingNameWithPort 確認連接埠不是 22 的主機, 記錄檔的 host 成員與目錄名稱含
+// 連接埠.
+func TestRecordingNameWithPort(t *testing.T) {
+	e := newEnv(t, testTiming())
+	st, err := e.m.AddHost(settings.HostConn{Addr: "gpu01", User: "alice", Port: 2222})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := st.ID
+	if id != "alice@gpu01:2222" || st.Name != id {
+		t.Fatalf("status %+v", st)
+	}
+	ls := newLinks()
+	e.dialer.set(okDialer(ls, "alice", nvidiaDevices(0)))
+	e.m.Connect(id)
+	l := ls.next(t)
+	e.waitState(id, StateConnected)
+	l.send(sampleMsg(1000, 10, []int{0}))
+	e.eventually("recording", time.Second, func() bool { return e.status(id).Recording != "" })
+	path := e.status(id).Recording
+	e.m.Disconnect(id)
+	if filepath.Base(filepath.Dir(path)) != "alice@gpu01+2222" {
+		t.Fatalf("recording path %s", path)
+	}
+	f, _ := readAll(t, path)
+	if h := f.Header(); h.Host != "alice@gpu01:2222" {
+		t.Fatalf("header %+v", h)
+	}
+}
+
+// TestConnectWithoutUser 確認舊版設定檔升級後仍無使用者名稱的主機連線時回報設定
+// 錯誤, 且不建立連線.
+func TestConnectWithoutUser(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, settings.FileName),
+		[]byte(`{"hosts": [{"addr": "nouser", "user": "", "port": 0, "key_file": "", "identities_only": false}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := settings.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := &env{t: t, dir: dir, store: store, dialer: &fakeDialer{}, events: &eventLog{}, clock: &fakeClock{}}
+	e.m = New(Options{DataDir: dir, Settings: store, Dialer: e.dialer, Notifier: e.events, Timing: testTiming(),
+		Now: e.clock.now, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	t.Cleanup(e.m.Close)
+	if st := e.status("nouser"); st.Name != "nouser" {
+		t.Fatalf("name %q", st.Name)
+	}
+	if err := e.m.Connect("nouser"); err != nil {
+		t.Fatal(err)
+	}
+	e.eventually("error event", 3*time.Second, func() bool { return len(e.events.all(EventError)) == 1 })
+	e.waitState("nouser", StateDisconnected)
+	ce := e.events.all(EventError)[0].(ConnectError)
+	if ce.Kind != ErrConfig || !strings.Contains(ce.Message, "No user name") {
+		t.Fatalf("error event %+v", ce)
+	}
+	if n := e.dialer.count(); n != 0 {
+		t.Fatalf("dial called %d times", n)
 	}
 }

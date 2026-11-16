@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { backend } from "../api/backend";
 import { serviceError } from "../api/errors";
 import type { HostConn, HostStatus, ServiceError } from "../api/types";
@@ -16,13 +16,22 @@ function FieldError({ text }: { text: string }) {
   );
 }
 
-// HostForm 為新增與編輯主機的表單. 表單不含密碼欄位, 密碼於連線時才要求輸入.
+// HostForm 為新增與編輯主機的表單. 表單不含密碼欄位, 密碼於連線時才要求輸入. 位址欄位
+// 失去焦點時查詢 ~/.ssh/config 對該位址的設定, 預填使用者尚未手動修改過的欄位.
 export function HostForm({ host, onClose }: { host: HostStatus | null; onClose: () => void }) {
   const t = useT();
   const [addr, setAddr] = useState(host?.addr ?? "");
   const [port, setPort] = useState(host && host.port > 0 ? String(host.port) : "");
   const [user, setUser] = useState(host?.user ?? "");
   const [keyFile, setKeyFile] = useState(host?.key_file ?? "");
+  const [identitiesOnly, setIdentitiesOnly] = useState(host?.identities_only ?? false);
+  const [warnings, setWarnings] = useState<string[]>([]);
+  // touched 記錄本次開啟表單以來使用者已手動修改的欄位, 預填不覆蓋這些欄位.
+  const touched = useRef(new Set<"port" | "keyFile" | "identitiesOnly">());
+  // lastQueried 為上次查詢的位址; 編輯表單以原位址起算, 位址未改變即不查詢.
+  const lastQueried = useRef(host?.addr.trim() ?? "");
+  // querySeq 用於丟棄較晚送出但較早回來的過時結果.
+  const querySeq = useRef(0);
   const [error, setError] = useState<{ key: MessageKey; detail?: string; field: "addr" | "port" | "user" | "form" } | null>(
     null,
   );
@@ -40,6 +49,10 @@ export function HostForm({ host, onClose }: { host: HostStatus | null; onClose: 
       setError({ key: "form.noSpace", field: "addr" });
       return;
     }
+    if (u === "") {
+      setError({ key: "errorCode.user-required", field: "user" });
+      return;
+    }
     let p = 0;
     if (port.trim() !== "") {
       p = Number(port.trim());
@@ -48,7 +61,7 @@ export function HostForm({ host, onClose }: { host: HostStatus | null; onClose: 
         return;
       }
     }
-    const conn: HostConn = { addr: a, port: p, user: u, key_file: keyFile.trim() };
+    const conn: HostConn = { addr: a, port: p, user: u, key_file: keyFile.trim(), identities_only: identitiesOnly };
     setBusy(true);
     try {
       const st = editing ? await updateHost(host.id, conn) : await addHost(conn);
@@ -68,10 +81,40 @@ export function HostForm({ host, onClose }: { host: HostStatus | null; onClose: 
     }
   };
 
+  const prefill = async () => {
+    const a = addr.trim();
+    if (a === "" || a === lastQueried.current) {
+      return;
+    }
+    lastQueried.current = a;
+    const seq = ++querySeq.current;
+    try {
+      const r = await backend.sshConfigDefaults(a);
+      if (seq !== querySeq.current) {
+        return;
+      }
+      if (r.port !== 0 && !touched.current.has("port")) {
+        setPort(String(r.port));
+      }
+      if (r.key_file !== "" && !touched.current.has("keyFile")) {
+        setKeyFile(r.key_file);
+      }
+      if (r.identities_only_set && !touched.current.has("identitiesOnly")) {
+        setIdentitiesOnly(r.identities_only);
+      }
+      setWarnings(r.warnings ?? []);
+    } catch {
+      if (seq === querySeq.current) {
+        setWarnings([]);
+      }
+    }
+  };
+
   const browse = async () => {
     try {
       const path = await backend.chooseKeyFile(tNow("form.chooseKey"));
       if (path) {
+        touched.current.add("keyFile");
         setKeyFile(path);
       }
     } catch (err) {
@@ -86,7 +129,9 @@ export function HostForm({ host, onClose }: { host: HostStatus | null; onClose: 
         <label htmlFor="hf-addr" className="field-label">
           {t("form.address")}
         </label>
-        <input id="hf-addr" className="input mono" value={addr} spellCheck={false} onChange={(e) => setAddr(e.target.value)} />
+        <input id="hf-addr" className="input mono" value={addr} spellCheck={false} onChange={(e) => setAddr(e.target.value)}
+          onBlur={prefill}
+        />
         {!editing && <span className="field-hint">{t("form.addressHint")}</span>}
       </div>
       {error?.field === "addr" && <FieldError text={t(error.key)} />}
@@ -101,7 +146,10 @@ export function HostForm({ host, onClose }: { host: HostStatus | null; onClose: 
             value={port}
             placeholder="22"
             inputMode="numeric"
-            onChange={(e) => setPort(e.target.value)}
+            onChange={(e) => {
+              touched.current.add("port");
+              setPort(e.target.value);
+            }}
           />
         </div>
         <div className="field">
@@ -123,7 +171,10 @@ export function HostForm({ host, onClose }: { host: HostStatus | null; onClose: 
             value={keyFile}
             placeholder={t("form.keyDefault")}
             spellCheck={false}
-            onChange={(e) => setKeyFile(e.target.value)}
+            onChange={(e) => {
+              touched.current.add("keyFile");
+              setKeyFile(e.target.value);
+            }}
           />
           <button type="button" className="btn" onClick={browse}>
             <FolderIcon />
@@ -132,12 +183,38 @@ export function HostForm({ host, onClose }: { host: HostStatus | null; onClose: 
         </div>
         {!editing && <span className="field-hint">{t("form.hint")}</span>}
       </div>
+      <label htmlFor="hf-identities" className="check-row">
+        <input
+          id="hf-identities"
+          type="checkbox"
+          className="check"
+          checked={identitiesOnly}
+          onChange={(e) => {
+            touched.current.add("identitiesOnly");
+            setIdentitiesOnly(e.target.checked);
+          }}
+        />
+        <span>{t("form.identitiesOnly")}</span>
+      </label>
       {error?.field === "form" && (
         <div className="form-error" role="alert">
           <WarningIcon />
           <div>
             <div>{t(error.key)}</div>
             {error.detail && <div className="form-error-detail">{error.detail}</div>}
+          </div>
+        </div>
+      )}
+      {warnings.length > 0 && (
+        <div className="form-error" role="status">
+          <WarningIcon />
+          <div>
+            <div>{t("form.sshConfigWarning")}</div>
+            {warnings.map((w, i) => (
+              <div key={i} className="form-error-detail">
+                {w}
+              </div>
+            ))}
           </div>
         </div>
       )}

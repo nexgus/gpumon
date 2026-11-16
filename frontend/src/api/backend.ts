@@ -30,6 +30,7 @@ export const backend: Backend = {
   live: (id) => host.Live(id),
   query: (id, from, to, width, fields, stats) => host.Query(id, int(from), int(to), int(width), fields, stats),
   chooseKeyFile: (title) => host.ChooseKeyFile(title),
+  sshConfigDefaults: (addr) => host.SSHConfigDefaults(addr),
 
   recordings: async () => {
     const l = await recording.List();

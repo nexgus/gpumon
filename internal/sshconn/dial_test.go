@@ -196,8 +196,17 @@ func TestExplicitKeyFile(t *testing.T) {
 	_, err = Dial(context.Background(), cfg)
 	expectKind(t, err, KindAuth)
 
-	// 主機表單的金鑰檔不存在時, 仍取用 ~/.ssh/config 的 IdentityFile.
+	// ~/.ssh/config 的 IdentityFile 不再取用.
 	writeFile(t, env.config, "Host *\n  IdentityFile ~/keys/mykey\n", 0o600)
+	_, err = Dial(context.Background(), cfg)
+	expectKind(t, err, KindAuth)
+
+	// 主機表單指定金鑰檔時不列出預設名稱的金鑰檔.
+	def := genKey(t, filepath.Join(env.sshDir, "id_ed25519"), "", false)
+	srv.authorize(pubOf(t, def))
+	_, err = Dial(context.Background(), cfg)
+	expectKind(t, err, KindAuth)
+	cfg.KeyFile = ""
 	c, err = Dial(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -210,32 +219,53 @@ func TestKeyFileOrder(t *testing.T) {
 	srv.setPassword("pw")
 	env := newTestEnv(t)
 	form := genKey(t, filepath.Join(env.home, "keys", "form"), "", false)
-	cfg1 := genKey(t, filepath.Join(env.home, "keys", "cfg1"), "", false)
-	cfg2 := genKey(t, filepath.Join(env.home, "keys", "cfg2"), "", false)
-	// 預設私鑰只在兩者皆無時列出.
-	genKey(t, filepath.Join(env.sshDir, "id_ed25519"), "", false)
+	rsa := genKey(t, filepath.Join(env.sshDir, "id_rsa"), "", false)
+	ed := genKey(t, filepath.Join(env.sshDir, "id_ed25519"), "", false)
 	agentKey := genKey(t, filepath.Join(env.home, "agentkey"), "", false)
 	keyring := agent.NewKeyring()
 	keyring.Add(agent.AddedKey{PrivateKey: agentKey})
 	// 已在 ssh-agent 中的金鑰檔不重複嘗試.
-	keyring.Add(agent.AddedKey{PrivateKey: cfg2})
-	writeFile(t, env.config, "Host *\n  IdentityFile ~/keys/cfg1\n  IdentityFile ~/keys/missing\n  IdentityFile ~/keys/cfg2\n", 0o600)
+	keyring.Add(agent.AddedKey{PrivateKey: rsa})
+	// ~/.ssh/config 的 IdentityFile 不列入.
+	writeFile(t, env.config, "Host *\n  IdentityFile ~/keys/form\n", 0o600)
 	cfg := env.cfg(srv)
-	cfg.KeyFile = filepath.Join(env.home, "keys", "form")
 	cfg.Agent = func(context.Context) (net.Conn, error) {
 		a, b := net.Pipe()
 		go agent.ServeAgent(keyring, b)
 		return a, nil
 	}
 	cfg.Password = func(context.Context, PasswordRequest) ([]byte, error) { return []byte("pw"), nil }
+	fp := func(k ed25519.PrivateKey) string { return ssh.FingerprintSHA256(pubOf(t, k)) }
+
+	// 主機表單未指定金鑰檔時依序列出預設名稱的金鑰檔.
 	c, err := Dial(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	c.Close()
-	fp := func(k ed25519.PrivateKey) string { return ssh.FingerprintSHA256(pubOf(t, k)) }
-	want := []string{fp(agentKey), fp(cfg2), fp(form), fp(cfg1)}
+	want := []string{fp(agentKey), fp(rsa), fp(ed)}
 	if got := srv.offeredKeys(); !reflect.DeepEqual(got, want) {
+		t.Errorf("offered keys = %v, want %v", got, want)
+	}
+
+	// 主機表單指定金鑰檔時只列該檔案.
+	srv2 := newTestServer(t)
+	srv2.setPassword("pw")
+	cfg = env.cfg(srv2)
+	cfg.Agent = func(context.Context) (net.Conn, error) {
+		a, b := net.Pipe()
+		go agent.ServeAgent(keyring, b)
+		return a, nil
+	}
+	cfg.Password = func(context.Context, PasswordRequest) ([]byte, error) { return []byte("pw"), nil }
+	cfg.KeyFile = filepath.Join(env.home, "keys", "form")
+	c, err = Dial(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+	want = []string{fp(agentKey), fp(rsa), fp(form)}
+	if got := srv2.offeredKeys(); !reflect.DeepEqual(got, want) {
 		t.Errorf("offered keys = %v, want %v", got, want)
 	}
 }
@@ -250,8 +280,11 @@ func TestIdentitiesOnly(t *testing.T) {
 	keyring := agent.NewKeyring()
 	keyring.Add(agent.AddedKey{PrivateKey: agentKey})
 	keyring.Add(agent.AddedKey{PrivateKey: fileKey})
-	writeFile(t, env.config, "Host *\n  IdentitiesOnly yes\n  IdentityFile ~/keys/file\n", 0o600)
+	// ~/.ssh/config 的 IdentitiesOnly 不再參考, 只依主機表單.
+	writeFile(t, env.config, "Host *\n  IdentitiesOnly no\n", 0o600)
 	cfg := env.cfg(srv)
+	cfg.KeyFile = filepath.Join(env.home, "keys", "file")
+	cfg.IdentitiesOnly = true
 	cfg.Agent = func(context.Context) (net.Conn, error) {
 		a, b := net.Pipe()
 		go agent.ServeAgent(keyring, b)
@@ -274,8 +307,9 @@ func TestIdentitiesOnly(t *testing.T) {
 		t.Errorf("offered keys = %v", got)
 	}
 
-	// IdentitiesOnly 未設定時, ssh-agent 的金鑰皆可使用.
-	writeFile(t, env.config, "Host *\n  IdentityFile ~/keys/file\n", 0o600)
+	// IdentitiesOnly 為假時, ssh-agent 的金鑰皆可使用, 即使 ~/.ssh/config 設為 yes.
+	writeFile(t, env.config, "Host *\n  IdentitiesOnly yes\n", 0o600)
+	cfg.IdentitiesOnly = false
 	asked = 0
 	c, err = Dial(context.Background(), cfg)
 	if err != nil {
@@ -287,20 +321,28 @@ func TestIdentitiesOnly(t *testing.T) {
 	}
 }
 
-func TestConfigIdentityFile(t *testing.T) {
+// TestConfigOnlyHostName 確認連線時 ~/.ssh/config 只取 HostName, Port, User 與
+// IdentityFile 一律以主機表單為準.
+func TestConfigOnlyHostName(t *testing.T) {
 	srv := newTestServer(t)
 	env := newTestEnv(t)
 	priv := genKey(t, filepath.Join(env.home, "cfgkeys", "id_host"), "", false)
 	srv.authorize(pubOf(t, priv))
-	writeFile(t, env.config, "Host myalias\n  HostName 127.0.0.1\n  Port "+srv.port+
-		"\n  User cfguser\n  IdentityFile ~/cfgkeys/id_%r\n", 0o600)
-	// 檔名以 %r 展開, 因此需要 id_cfguser.
-	os.Rename(filepath.Join(env.home, "cfgkeys", "id_host"), filepath.Join(env.home, "cfgkeys", "id_cfguser"))
+	writeFile(t, env.config, "Host myalias\n  HostName "+srv.host+"\n  Port 1\n  User cfguser\n  IdentityFile ~/cfgkeys/id_host\n", 0o600)
 	cfg := env.cfg(srv)
-	cfg.Host, cfg.Port, cfg.User = "myalias", 0, ""
+	cfg.Host = "myalias"
+	_, err := Dial(context.Background(), cfg)
+	expectKind(t, err, KindAuth)
+	if !strings.Contains(err.Error(), "tester@myalias") {
+		t.Errorf("error = %v; the user name of the form must be used", err)
+	}
+	cfg.KeyFile = filepath.Join(env.home, "cfgkeys", "id_host")
 	c, err := Dial(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if c.SSH().User() != "tester" {
+		t.Errorf("user = %q", c.SSH().User())
 	}
 	c.Close()
 }
@@ -475,11 +517,10 @@ func TestPassphraseSkipFallsBackToPassword(t *testing.T) {
 			srv := newTestServer(t)
 			srv.setPassword("pw")
 			env := newTestEnv(t)
-			first := genKey(t, filepath.Join(env.home, "keys", "first"), "secret", false)
-			second := genKey(t, filepath.Join(env.home, "keys", "second"), "", false)
+			first := genKey(t, filepath.Join(env.sshDir, "id_rsa"), "secret", false)
+			second := genKey(t, filepath.Join(env.sshDir, "id_ed25519"), "", false)
 			srv.authorize(pubOf(t, first))
 			srv.authorize(pubOf(t, second))
-			writeFile(t, env.config, "Host *\n  IdentityFile ~/keys/first\n  IdentityFile ~/keys/second\n", 0o600)
 			cfg := env.cfg(srv)
 			asked := 0
 			cfg.Passphrase = func(ctx context.Context, req PassphraseRequest) ([]byte, error) {

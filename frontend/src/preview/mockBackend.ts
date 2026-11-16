@@ -100,6 +100,7 @@ function status(id: string, addr: string, user: string, state: HostStatus["state
     port: 0,
     user,
     key_file: "",
+    identities_only: false,
     state,
     reason: "",
     retries: 0,
@@ -722,6 +723,15 @@ export const backend: Backend = {
   },
   async chooseKeyFile() {
     return "~/.ssh/lab_ed25519";
+  },
+  async sshConfigDefaults(addr) {
+    if (addr === "lab-gpu") {
+      return { port: 2222, key_file: "~/.ssh/lab_ed25519", identities_only: true, identities_only_set: true, warnings: [] };
+    }
+    if (addr === "bad-config") {
+      return { port: 0, key_file: "", identities_only: false, identities_only_set: false, warnings: ["line 12: unsupported option \"Foo\" is ignored"] };
+    }
+    return { port: 0, key_file: "", identities_only: false, identities_only_set: false, warnings: [] };
   },
   async recordings() {
     return { hosts: recGroups(), skipped: skippedRecordings.map((x) => ({ ...x })) };

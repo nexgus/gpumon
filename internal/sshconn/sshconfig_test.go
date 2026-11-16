@@ -3,8 +3,10 @@
 package sshconn
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -37,9 +39,9 @@ Host *
   Port 22
 `, 0o600)
 
-	got, err := loadHostConfig(env.config, "gpu01", env.home)
-	if err != nil {
-		t.Fatal(err)
+	got, warnings := loadHostConfig(env.config, "gpu01", env.home)
+	if len(warnings) != 0 {
+		t.Fatal(warnings)
 	}
 	want := hostConfig{
 		HostName: "10.0.0.1", User: "alice", Port: 2222,
@@ -69,9 +71,9 @@ Host *
 		t.Errorf("other = %+v", got)
 	}
 
-	got, err = loadHostConfig(filepath.Join(env.home, "missing"), "gpu01", env.home)
-	if err != nil || !reflect.DeepEqual(got, hostConfig{}) {
-		t.Errorf("missing file = %+v, %v", got, err)
+	got, warnings = loadHostConfig(filepath.Join(env.home, "missing"), "gpu01", env.home)
+	if warnings == nil || len(warnings) != 0 || !reflect.DeepEqual(got, hostConfig{}) {
+		t.Errorf("missing file = %+v, %#v", got, warnings)
 	}
 }
 
@@ -109,9 +111,9 @@ Host target
   User should-not-apply
 `, 0o600)
 
-	got, err := loadHostConfig(env.config, "target", env.home)
-	if err != nil {
-		t.Fatal(err)
+	got, warnings := loadHostConfig(env.config, "target", env.home)
+	if len(warnings) != 0 {
+		t.Fatal(warnings)
 	}
 	want := hostConfig{
 		HostName: "192.0.2.10", User: "target-user", Port: 2200,
@@ -146,20 +148,105 @@ Host *
 	}
 }
 
-func TestLoadHostConfigErrors(t *testing.T) {
+func TestLoadHostConfigTolerant(t *testing.T) {
 	env := newTestEnv(t)
-	writeFile(t, env.config, "Host x\n  Port abc\n", 0o600)
-	if _, err := loadHostConfig(env.config, "x", env.home); err == nil {
-		t.Error("invalid port accepted")
+	writeFile(t, env.config, `Host x
+  Port abc
+  Port
+  IdentitiesOnly maybe
+  HostName "unterminated
+  User "alice"
+  Port 2200
+  Include missing-dir/*.conf
+  Include "bad
+  IdentitiesOnly yes
+Host "broken
+  User wrong
+Host x
+  HostName real.example.com
+`, 0o600)
+	got, warnings := loadHostConfig(env.config, "x", env.home)
+	want := hostConfig{HostName: "real.example.com", User: "alice", Port: 2200, IdentitiesOnly: true, identitiesOnlySet: true}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("config = %+v, want %+v", got, want)
 	}
-	writeFile(t, env.config, "Host x\n  IdentitiesOnly maybe\n", 0o600)
-	if _, err := loadHostConfig(env.config, "x", env.home); err == nil {
-		t.Error("invalid IdentitiesOnly accepted")
+	wantWarnings := []string{
+		`Skipped line 2 of ~/.ssh/config: invalid port "abc"`,
+		`Skipped line 3 of ~/.ssh/config: missing argument for Port`,
+		`Skipped line 4 of ~/.ssh/config: invalid IdentitiesOnly value "maybe"`,
+		`Skipped line 5 of ~/.ssh/config: unterminated quote`,
+		`Skipped line 9 of ~/.ssh/config: unterminated quote`,
+		`Skipped line 11 of ~/.ssh/config: unterminated quote`,
 	}
-	writeFile(t, env.config, "Include self\n", 0o600)
+	if !reflect.DeepEqual(warnings, wantWarnings) {
+		t.Errorf("warnings = %q, want %q", warnings, wantWarnings)
+	}
+
+	// Include 巢狀過深時略過該 Include, 其餘照常使用.
+	writeFile(t, env.config, "Include self\nHost x\n  User bob\n", 0o600)
 	writeFile(t, filepath.Join(env.sshDir, "self"), "Include self\n", 0o600)
-	if _, err := loadHostConfig(env.config, "x", env.home); err == nil {
-		t.Error("recursive Include accepted")
+	got, warnings = loadHostConfig(env.config, "x", env.home)
+	if got.User != "bob" || len(warnings) != 1 || !strings.Contains(warnings[0], "nested more than 16 levels") ||
+		!strings.Contains(warnings[0], "line 1 of ~/.ssh/self") {
+		t.Errorf("recursive Include: %+v %q", got, warnings)
+	}
+
+	if os.Geteuid() != 0 {
+		// Include 的檔案讀不到時略過該檔案.
+		unreadable := filepath.Join(env.sshDir, "secret.conf")
+		writeFile(t, unreadable, "Host x\n  User secret\n", 0o000)
+		writeFile(t, env.config, "Include secret.conf\nHost x\n  Port 2022\n", 0o600)
+		got, warnings = loadHostConfig(env.config, "x", env.home)
+		if got.Port != 2022 || got.User != "" || len(warnings) != 1 ||
+			!strings.HasPrefix(warnings[0], "Skipped the Include on line 1 of ~/.ssh/config for ~/.ssh/secret.conf") {
+			t.Errorf("unreadable Include: %+v %q", got, warnings)
+		}
+
+		// 主檔案讀不到時視為沒有設定.
+		writeFile(t, env.config, "Host x\n  Port 2022\n", 0o600)
+		if err := os.Chmod(env.config, 0o000); err != nil {
+			t.Fatal(err)
+		}
+		got, warnings = loadHostConfig(env.config, "x", env.home)
+		if !reflect.DeepEqual(got, hostConfig{}) || len(warnings) != 1 ||
+			!strings.HasPrefix(warnings[0], "Ignored ~/.ssh/config because it cannot be read") {
+			t.Errorf("unreadable config: %+v %q", got, warnings)
+		}
+	}
+}
+
+func TestLookupConfig(t *testing.T) {
+	env := newTestEnv(t)
+	writeFile(t, env.config, `Host gpu
+  HostName %h.example
+  User alice
+  Port 2222
+  IdentityFile none
+  IdentityFile ~/.ssh/id_%r_%h_%p
+  IdentityFile ~/.ssh/second
+  IdentitiesOnly yes
+  Port oops
+Host plain
+  IdentityFile keys/rel
+`, 0o600)
+	d := LookupConfig(env.config, env.home, "gpu")
+	want := ConfigDefaults{
+		User: "alice", Port: 2222,
+		KeyFile:        filepath.Join(env.sshDir, "id_alice_gpu.example_2222"),
+		IdentitiesOnly: true, IdentitiesOnlySet: true,
+		Warnings: []string{`Skipped line 9 of ~/.ssh/config: invalid port "oops"`},
+	}
+	if !reflect.DeepEqual(d, want) {
+		t.Errorf("gpu = %+v, want %+v", d, want)
+	}
+	d = LookupConfig(env.config, env.home, "plain")
+	if d.KeyFile != filepath.Join(env.home, "keys", "rel") || d.Port != 0 || d.User != "" || d.IdentitiesOnlySet ||
+		d.Warnings == nil || len(d.Warnings) != 0 {
+		t.Errorf("plain = %+v", d)
+	}
+	d = LookupConfig(filepath.Join(env.home, "missing"), env.home, "gpu")
+	if d.KeyFile != "" || d.Port != 0 || d.Warnings == nil || len(d.Warnings) != 0 {
+		t.Errorf("missing = %+v", d)
 	}
 }
 

@@ -111,7 +111,7 @@ export const keyResultsStore = new Store<KeyResultNotice[]>([]);
 let keyResultSeq = 0;
 // uploadsStore 為等待使用者確認的上傳通知, 依收到的先後排列.
 export const uploadsStore = new Store<UploadNotice[]>([]);
-// quitStore 為等待使用者確認的結束要求; 再次要求結束時以新的主機數取代.
+// quitStore 為等待使用者確認的結束要求; 再次要求結束時以新的要求取代.
 export const quitStore = new Store<QuitRequest | null>(null);
 
 // 主區域離開歷史畫面即關閉開啟中的記錄檔, 一併清除其顯示位置與固定時刻.

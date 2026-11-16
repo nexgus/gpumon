@@ -26,8 +26,8 @@ const (
 	KindExec
 	// KindProtocolTooNew 為遠端的協定版本高於 GUI 的協定版本.
 	KindProtocolTooNew
-	// KindConfig 為連線設定不合法, 例如缺少使用者名稱, ~/.ssh/config 或
-	// known_hosts 無法解析.
+	// KindConfig 為連線設定不合法, 例如缺少使用者名稱. ~/.ssh/config 與
+	// known_hosts 的問題不產生此種類的錯誤.
 	KindConfig
 	// KindCanceled 為呼叫端取消, 包括 context 取消, 使用者取消輸入登入密碼, 不接受
 	// 主機金鑰, 以及詢問的回呼函數回傳錯誤.
@@ -69,14 +69,20 @@ type Error struct {
 	Kind    Kind
 	Message string
 	Err     error
+	// note 為附加於說明與底層原因之後的一句補充, 例如 ~/.ssh/config 有略過的內容.
+	note string
 }
 
-// Error 回傳 Message 與底層原因.
+// Error 回傳 Message, 底層原因與補充說明.
 func (e *Error) Error() string {
-	if e.Err == nil {
-		return e.Message
+	msg := e.Message
+	if e.Err != nil {
+		msg += ": " + e.Err.Error()
 	}
-	return e.Message + ": " + e.Err.Error()
+	if e.note != "" {
+		msg += ". " + e.note
+	}
+	return msg
 }
 
 // Unwrap 回傳底層原因.

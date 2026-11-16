@@ -68,23 +68,23 @@ func TestRoundTrip(t *testing.T) {
 	must(s.SetMonitorSpan(MaxMonitorSpanMS))
 	must(s.SetHistorySpan(7_654_321, true))
 	must(s.SetCurves([]Curve{CurveTemp, CurveUtil, CurveClockMem}))
-	must(s.SetGPUCollapsed("alice@10.0.0.5", 1, true))
-	must(s.SetGPUCollapsed("alice@10.0.0.5", 0, true))
+	must(s.SetGPUCollapsed("alice@10.0.0.5:2222", 1, true))
+	must(s.SetGPUCollapsed("alice@10.0.0.5:2222", 0, true))
 	must(s.SetGPUCollapsed("gpu02", 0, true))
 	must(s.SetGPUCollapsed("gpu02", 0, false))
-	must(s.SetProcsCollapsed("alice@10.0.0.5", true))
+	must(s.SetProcsCollapsed("alice@10.0.0.5:2222", true))
 	must(s.SetProcsCollapsed("gpu02", true))
 	must(s.SetProcsCollapsed("gpu02", false))
 	must(s.SetMaximaCollapsed("gpu02", true))
-	must(s.SetMaximaCollapsed("alice@10.0.0.5", true))
-	must(s.SetMaximaCollapsed("alice@10.0.0.5", false))
+	must(s.SetMaximaCollapsed("alice@10.0.0.5:2222", true))
+	must(s.SetMaximaCollapsed("alice@10.0.0.5:2222", false))
 
 	s2 := mustOpen(t, dir)
 	if !reflect.DeepEqual(s.Snapshot(), s2.Snapshot()) {
 		t.Fatalf("mismatch:\n%+v\n%+v", s.Snapshot(), s2.Snapshot())
 	}
-	if !s2.GPUCollapsed("alice@10.0.0.5", 0) || !s2.GPUCollapsed("alice@10.0.0.5", 1) ||
-		s2.GPUCollapsed("gpu02", 0) || s2.GPUCollapsed("alice@10.0.0.5", 2) {
+	if !s2.GPUCollapsed("alice@10.0.0.5:2222", 0) || !s2.GPUCollapsed("alice@10.0.0.5:2222", 1) ||
+		s2.GPUCollapsed("gpu02", 0) || s2.GPUCollapsed("alice@10.0.0.5:2222", 2) {
 		t.Errorf("collapsed state wrong: %v", s2.Snapshot().CollapsedGPUs)
 	}
 	if _, ok := s2.Snapshot().CollapsedGPUs["gpu02"]; ok {
@@ -93,14 +93,14 @@ func TestRoundTrip(t *testing.T) {
 	if s2.Snapshot().SizeUnits != SizeUnitsDecimal {
 		t.Errorf("size units = %v", s2.Snapshot().SizeUnits)
 	}
-	h, _ := s2.Host("alice@10.0.0.5")
+	h, _ := s2.Host("alice@10.0.0.5:2222")
 	if d := s2.Snapshot(); d.MonitorSpanMS != MaxMonitorSpanMS || d.HistorySpanMS != 7_654_321 || !d.HistoryAll {
 		t.Errorf("spans = %d %d %v", d.MonitorSpanMS, d.HistorySpanMS, d.HistoryAll)
 	}
-	if !s2.ProcsCollapsed("alice@10.0.0.5") || s2.ProcsCollapsed("gpu02") {
+	if !s2.ProcsCollapsed("alice@10.0.0.5:2222") || s2.ProcsCollapsed("gpu02") {
 		t.Errorf("procs %v", s2.Snapshot().CollapsedProcs)
 	}
-	if !s2.MaximaCollapsed("gpu02") || s2.MaximaCollapsed("alice@10.0.0.5") {
+	if !s2.MaximaCollapsed("gpu02") || s2.MaximaCollapsed("alice@10.0.0.5:2222") {
 		t.Errorf("maxima %v", s2.Snapshot().CollapsedMaxima)
 	}
 	if h.Port != 2222 || h.KeyFile != "~/.ssh/k" {
@@ -160,7 +160,7 @@ func TestHostLifecycleAndOrder(t *testing.T) {
 	if s.NoKeySetupPrompt("v@bb") || s.NoKeySetupPrompt("u@b") || !s.NoKeySetupPrompt("u@c") {
 		t.Errorf("no key setup prompt on rename: %v", s.Snapshot().NoKeySetupPrompt)
 	}
-	if err := s.UpdateHost("u@d", HostConn{Addr: "d", User: "u", Port: 2222}); err != nil {
+	if err := s.UpdateHost("u@d", HostConn{Addr: "d", User: "u", Port: 22, KeyFile: "/k"}); err != nil {
 		t.Fatal(err)
 	}
 	if !s.NoKeySetupPrompt("u@d") {
@@ -203,8 +203,14 @@ func TestDuplicateHosts(t *testing.T) {
 	if err := s.AddHost(HostConn{Addr: "Host1", User: "alice"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.AddHost(HostConn{Addr: "host1", User: "alice", Port: 99}); !errors.Is(err, ErrDuplicateHost) {
-		t.Errorf("same user/addr: %v", err)
+	if err := s.AddHost(HostConn{Addr: "host1", User: "alice", Port: 22}); !errors.Is(err, ErrDuplicateHost) {
+		t.Errorf("same user/addr, port 0 and 22: %v", err)
+	}
+	if err := s.AddHost(HostConn{Addr: "host1", User: "alice", Port: 99}); err != nil {
+		t.Errorf("different port must be a different host: %v", err)
+	}
+	if err := s.AddHost(HostConn{Addr: "HOST1", User: "alice", Port: 99}); !errors.Is(err, ErrDuplicateHost) {
+		t.Errorf("same user/addr/port: %v", err)
 	}
 	if err := s.AddHost(HostConn{Addr: "Host1", User: "bob"}); err != nil {
 		t.Errorf("different user must be a different host: %v", err)
@@ -218,7 +224,7 @@ func TestDuplicateHosts(t *testing.T) {
 	if err := s.AddHost(HostConn{Addr: "HOST1"}); !errors.Is(err, ErrDuplicateHost) {
 		t.Errorf("empty user duplicate: %v", err)
 	}
-	if n := len(s.Hosts()); n != 4 {
+	if n := len(s.Hosts()); n != 5 {
 		t.Errorf("hosts = %d", n)
 	}
 }

@@ -429,7 +429,7 @@ func TestDeployConfirmUploadHash(t *testing.T) {
 		f := newDeployFixture(t)
 		writeFile(t, f.remotePath(), string(fakeRemoteHash("0.3.0", "abcdef0", 1)), 0o755)
 		req := run(t, f, opts)
-		if req.RemoteHash != "abcdef0" || req.SameVersion || req.RemoteVersion != "0.3.0" || req.NewHash != version.ContentHash(guiBin) {
+		if req.RemoteHash != "abcdef0" || req.RemoteVersion != "0.3.0" || req.NewHash != version.ContentHash(guiBin) {
 			t.Errorf("request = %+v", req)
 		}
 	})
@@ -438,7 +438,7 @@ func TestDeployConfirmUploadHash(t *testing.T) {
 		f := newDeployFixture(t)
 		writeFile(t, f.remotePath(), string(fakeRemoteHash("0.4.0", "abcdef0", 1)), 0o755)
 		req := run(t, f, opts)
-		if req.RemoteHash != "abcdef0" || !req.SameVersion {
+		if req.RemoteHash != "abcdef0" || req.RemoteVersion != "0.4.0" {
 			t.Errorf("request = %+v", req)
 		}
 	})
@@ -447,7 +447,7 @@ func TestDeployConfirmUploadHash(t *testing.T) {
 		f := newDeployFixture(t)
 		writeFile(t, f.remotePath(), string(fakeRemote("0.4.0", 1)), 0o755)
 		req := run(t, f, opts)
-		if req.RemoteHash != UnknownHash || !req.SameVersion {
+		if req.RemoteHash != UnknownHash || req.RemoteVersion != "0.4.0" {
 			t.Errorf("request = %+v", req)
 		}
 	})
@@ -456,7 +456,7 @@ func TestDeployConfirmUploadHash(t *testing.T) {
 		f := newDeployFixture(t)
 		writeFile(t, f.remotePath(), string(fakeRemoteHash("0.2.0", "1234567", 1)), 0o755)
 		req := run(t, f, opts)
-		if req.RemoteHash != UnknownHash || req.SameVersion {
+		if req.RemoteHash != UnknownHash || req.RemoteVersion != "0.2.0" {
 			t.Errorf("request = %+v", req)
 		}
 	})

@@ -12,7 +12,7 @@ import (
 
 // Target 為連線一台主機所需的設定.
 type Target struct {
-	// Conn 為主機表單的四個欄位.
+	// Conn 為主機表單的欄位.
 	Conn settings.HostConn
 	// IntervalMS 為以 --interval 傳給遠端程式的取樣間隔.
 	IntervalMS int
@@ -78,6 +78,7 @@ func (d SSHDialer) Dial(ctx context.Context, t Target, auth Auth) (Link, error) 
 		Port:                  t.Conn.Port,
 		User:                  t.Conn.User,
 		KeyFile:               t.Conn.KeyFile,
+		IdentitiesOnly:        t.Conn.IdentitiesOnly,
 		Password:              auth.Password,
 		Passphrase:            auth.Passphrase,
 		HostKey:               auth.HostKey,

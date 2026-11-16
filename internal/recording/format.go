@@ -55,7 +55,7 @@ func (e *UnsupportedVersionError) Error() string {
 
 // Header 為說明區的內容.
 type Header struct {
-	// Host 為該主機的 user@addr.
+	// Host 為該主機的識別, 連接埠為 22 時為 user@addr, 其他連接埠為 user@addr:port.
 	Host string
 	// TWall0 為本機收到第一次連線第一筆 sample 訊息的時刻, 單位為微秒.
 	TWall0 int64
