@@ -44,7 +44,24 @@ func add(w *recording.Writer, rel float64, intervalMS int, util int64, ids ...in
 	for _, id := range ids {
 		gs = append(gs, recording.GPUSample{ID: id, Util: iv(util)})
 	}
-	return w.AddSample(ts0+rel, intervalMS, gs)
+	t, err := w.AddSample(ts0+rel, intervalMS, gs, nil)
+	if err != nil {
+		panic(err)
+	}
+	return t
+}
+
+// addProcs 與 add 相同, 另附各 GPU 的程序列表.
+func addProcs(w *recording.Writer, rel float64, intervalMS int, util int64, procs []recording.GPUProcs, ids ...int) int64 {
+	var gs []recording.GPUSample
+	for _, id := range ids {
+		gs = append(gs, recording.GPUSample{ID: id, Util: iv(util)})
+	}
+	t, err := w.AddSample(ts0+rel, intervalMS, gs, procs)
+	if err != nil {
+		panic(err)
+	}
+	return t
 }
 
 func flush(t *testing.T, w *recording.Writer) {

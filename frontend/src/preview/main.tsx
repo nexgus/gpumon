@@ -9,8 +9,7 @@
 //   (queue 依序送出上傳通知, 錯誤與密碼輸入要求, 只顯示第一個; next=<n> 依序按下前 n 個視窗的主要按鍵),
 //   hover=<0 至 1> (於第 n 張曲線圖的該位置懸停, 歷史畫面中靠近 0 或 1 即位於邊緣區), hoverChart=<n>, pin=<0 至 1> (於第 n 張曲線圖
 //   的該位置點選以固定時刻, n 為 hoverChart),
-//   page=recordings|history|settings (顯示該畫面), hspan=<歷史畫面的顯示範圍長度, 毫秒>, hall=1 (歷史畫面
-//   處於顯示全部狀態),
+//   page=recordings|history|settings (顯示該畫面),
 //   rhost=<n> (進入記錄檔第一層第 n 列的第二層, 自 0 起; 指定 select, openrec, confirmdelete 或
 //   page=history 而未指定時為 0), select=all|<第二層由上而下的列號, 以逗號分隔, 自 0 起> (選取), openrec=1 (按 Open,
 //   顯示歷史畫面), confirmdelete=1 (按 Delete, 顯示確認視窗), dialog=quit (結束確認視窗),

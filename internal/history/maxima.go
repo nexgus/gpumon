@@ -1,6 +1,7 @@
 package history
 
 import (
+	"math"
 	"slices"
 
 	"gpumon/internal/recording"
@@ -10,6 +11,9 @@ import (
 var maximaFields = []Field{
 	FieldUtil, FieldMemUsed, FieldTemp, FieldFan, FieldPowerW, FieldClockGPU, FieldClockMem,
 }
+
+// maximaMetrics 為 maximaFields 各欄位對應的記錄檔數值欄位.
+var maximaMetrics = metricsOf(maximaFields)
 
 // FieldMax 為單張 GPU 單一欄位於整個記錄檔的最大值. Runs 為最大值的出現處, 依時刻遞增,
 // 每個元素為 [起, 迄] 兩筆取樣的時刻 (Unix 微秒).
@@ -66,20 +70,23 @@ func Maxima(path string) (*MaximaResult, error) {
 		return nil, err
 	}
 	defer f.Close()
-	n, err := f.Count()
-	if err != nil {
-		return nil, err
-	}
 	ids := f.GPUIDs()
 	tr := make([][]maxTracker, len(ids))
 	for i := range tr {
 		tr[i] = make([]maxTracker, len(maximaFields))
 	}
+	it, err := f.SeekTime(math.MinInt64, false)
+	if err != nil {
+		return nil, err
+	}
 	broken := false
-	for i := 0; i < n; i += chunkRecords {
-		recs, err := f.ReadIndexRange(i, min(i+chunkRecords, n))
+	for {
+		recs, ok, err := it.Next()
 		if err != nil {
 			return nil, err
+		}
+		if !ok {
+			break
 		}
 		for k := range recs {
 			rec := &recs[k]
@@ -91,8 +98,8 @@ func Maxima(path string) (*MaximaResult, error) {
 					if gi >= len(tr) {
 						break
 					}
-					for fi, fld := range maximaFields {
-						if v, ok := fieldValue(&rec.GPUs[gi], fld); ok {
+					for fi, m := range maximaMetrics {
+						if v, ok := rec.GPUs[gi].Value(m); ok {
 							tr[gi][fi].add(v, rec.Time, broken)
 						} else {
 							tr[gi][fi].open = false
@@ -156,8 +163,8 @@ func (m *MaxTracker) Add(rec *recording.Record) {
 		if gi >= len(m.ids) {
 			break
 		}
-		for fi, fld := range maximaFields {
-			if v, ok := fieldValue(&rec.GPUs[gi], fld); ok && (!m.has[gi][fi] || v > m.max[gi][fi]) {
+		for fi, mt := range maximaMetrics {
+			if v, ok := rec.GPUs[gi].Value(mt); ok && (!m.has[gi][fi] || v > m.max[gi][fi]) {
 				m.has[gi][fi], m.max[gi][fi] = true, v
 			}
 		}
@@ -188,26 +195,19 @@ func (m *MaxTracker) Result() []GPUFileMax {
 // SampleGPU 為單筆取樣中單張 GPU 的數值, 無值的欄位為 nil.
 type SampleGPU struct {
 	ID       int     `json:"id"`
-	Util     *uint8  `json:"util"`
+	Util     *int64  `json:"util"`
 	MemUsed  *uint64 `json:"mem_used"`
-	Temp     *int16  `json:"temp"`
-	Fan      *uint8  `json:"fan"`
-	PowerW   *uint16 `json:"power_w"`
-	ClockGPU *uint16 `json:"clock_gpu"`
-	ClockMem *uint16 `json:"clock_mem"`
+	Temp     *int64  `json:"temp"`
+	Fan      *int64  `json:"fan"`
+	PowerW   *int64  `json:"power_w"`
+	ClockGPU *int64  `json:"clock_gpu"`
+	ClockMem *int64  `json:"clock_mem"`
 }
 
 // SampleAtResult 為 SampleAt 選到的取樣.
 type SampleAtResult struct {
 	Time int64       `json:"time"`
 	GPUs []SampleGPU `json:"gpus"`
-}
-
-func optional[T comparable](v, none T) *T {
-	if v == none {
-		return nil
-	}
-	return &v
 }
 
 // SampleAt 回傳記錄檔中時刻不晚於 t (含 t) 的最近一筆取樣, 選取規則與 ProcessesAt 相同.
@@ -218,33 +218,18 @@ func SampleAt(path string, t int64) (*SampleAtResult, error) {
 		return nil, err
 	}
 	defer f.Close()
-	n, err := f.Count()
-	if err != nil {
-		return nil, err
-	}
-	hi := n
-	if t < maxTime {
-		if hi, err = f.LowerBound(t + 1); err != nil {
-			return nil, err
+	var res *SampleAtResult
+	err = f.Backward(t, false, func(rec *recording.Record) bool {
+		switch rec.Kind {
+		case recording.KindDisconnect:
+			return false
+		case recording.KindSample:
+			res = sampleResult(rec, t)
+			return false
 		}
-	}
-	for c := scanRecords; hi > 0; c *= 2 {
-		start := max(0, hi-c)
-		recs, err := f.ReadIndexRange(start, hi)
-		if err != nil {
-			return nil, err
-		}
-		hi = start
-		for i := len(recs) - 1; i >= 0; i-- {
-			switch recs[i].Kind {
-			case recording.KindDisconnect:
-				return nil, nil
-			case recording.KindSample:
-				return sampleResult(&recs[i], t), nil
-			}
-		}
-	}
-	return nil, nil
+		return true
+	})
+	return res, err
 }
 
 func sampleResult(rec *recording.Record, t int64) *SampleAtResult {
@@ -260,13 +245,16 @@ func sampleResult(rec *recording.Record, t int64) *SampleAtResult {
 		g := &rec.GPUs[i]
 		res.GPUs[i] = SampleGPU{
 			ID:       g.ID,
-			Util:     optional(g.Util, recording.NoValue8),
-			MemUsed:  optional(g.MemUsed, recording.NoValue64),
-			Temp:     optional(g.Temp, recording.NoValueI16),
-			Fan:      optional(g.Fan, recording.NoValue8),
-			PowerW:   optional(g.PowerW, recording.NoValue16),
-			ClockGPU: optional(g.ClockGPU, recording.NoValue16),
-			ClockMem: optional(g.ClockMem, recording.NoValue16),
+			Util:     g.Int(recording.MetricUtil),
+			Temp:     g.Int(recording.MetricTemp),
+			Fan:      g.Int(recording.MetricFan),
+			PowerW:   g.Int(recording.MetricPowerW),
+			ClockGPU: g.Int(recording.MetricClockGPU),
+			ClockMem: g.Int(recording.MetricClockMem),
+		}
+		if g.Has&(1<<recording.MetricMemUsed) != 0 {
+			mem := g.MemUsed
+			res.GPUs[i].MemUsed = &mem
 		}
 	}
 	return res

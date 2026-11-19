@@ -57,7 +57,8 @@ func (s *RecordingService) Query(ctx context.Context, paths []string, from, to i
 	return res, toErr(err)
 }
 
-// ProcessesAt 回傳記錄檔中時刻不晚於 t (Unix 微秒) 的最近一筆程序記錄; 沒有時回傳 null.
+// ProcessesAt 回傳記錄檔中時刻不晚於 t (Unix 微秒) 的最近一次取樣的程序列表; 沒有該次取樣,
+// 或其程序列表因檔案損壞而無法還原時回傳 null.
 func (s *RecordingService) ProcessesAt(path string, t int64) (*history.ProcessList, error) {
 	p, err := history.ProcessesAt(path, t)
 	return p, toErr(err)
@@ -148,12 +149,6 @@ func (s *SettingsService) SetLanguage(v settings.Language) error {
 // SetMonitorSpan 變更監看畫面的顯示範圍長度 (毫秒, 1 分鐘至 24 小時), 所有主機共用.
 func (s *SettingsService) SetMonitorSpan(ms int64) error {
 	return toErr(s.b.store.SetMonitorSpan(ms))
-}
-
-// SetHistorySpan 變更歷史畫面的顯示範圍長度 (毫秒, 不短於 1 分鐘) 與是否處於顯示全部
-// 狀態.
-func (s *SettingsService) SetHistorySpan(ms int64, all bool) error {
-	return toErr(s.b.store.SetHistorySpan(ms, all))
 }
 
 // SetCurves 變更曲線的選擇, 依傳入的順序保留, 不得重複, 至多 MaxCurves 條, 可為空.

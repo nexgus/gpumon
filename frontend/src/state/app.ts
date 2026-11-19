@@ -58,10 +58,14 @@ export interface OperationError {
 // null 表示沒有開啟中的記錄檔. left 為顯示範圍的左緣 (Unix 微秒), null 表示尚未決定,
 // 由歷史畫面取捲動範圍的最右端. pinned 為固定時刻 (Unix 微秒), null 表示未固定. maxSel
 // 為最大值卡片中選取的一格, null 表示未選取; 選取時 pinned 為其中一處的時刻, 清除或改設
-// 固定時刻時一併解除. pinned 與 maxSel 皆不存入設定檔.
+// 固定時刻時一併解除. all 為是否處於顯示全部狀態, 開啟記錄檔時為真; spanMS 為不處於顯示
+// 全部狀態時顯示範圍的長度 (毫秒). 顯示範圍的位置與長度, pinned 與 maxSel 皆只存在於開啟
+// 中的記錄檔, 不存入設定檔, 也不帶到下一次開啟.
 export interface HistoryState {
   path: string | null;
   left: number | null;
+  all: boolean;
+  spanMS: number;
   pinned: number | null;
   maxSel: MaxSelection | null;
 }
@@ -79,7 +83,8 @@ export const liveStore = new Store<Record<string, Live>>({});
 export const settingsStore = new Store<SettingsData | null>(null);
 export const choicesStore = new Store<Choices | null>(null);
 export const uiStore = new Store<UIState>({ page: "monitor", selected: null });
-export const historyStore = new Store<HistoryState>({ path: null, left: null, pinned: null, maxSel: null });
+const closedHistory: HistoryState = { path: null, left: null, all: true, spanMS: 300_000, pinned: null, maxSel: null };
+export const historyStore = new Store<HistoryState>(closedHistory);
 
 export const monitorTabsStore = new Store<MonitorTabsState>({ kept: new Set(), leaving: new Set(), opening: new Set() });
 
@@ -117,7 +122,7 @@ export const quitStore = new Store<QuitRequest | null>(null);
 // 主區域離開歷史畫面即關閉開啟中的記錄檔, 一併清除其顯示位置與固定時刻.
 uiStore.subscribe(() => {
   if (uiStore.get().page !== "history" && historyStore.get().path !== null) {
-    historyStore.set({ path: null, left: null, pinned: null, maxSel: null });
+    historyStore.set(closedHistory);
   }
 });
 
@@ -383,11 +388,10 @@ async function saveSetting<K extends keyof SettingsData>(
   }
 }
 
-// 顯示範圍長度於縮放 (例如捏合) 過程中連續改變, 畫面立即更新, 寫入設定檔則於停止改變
-// spanSaveDelay 毫秒後進行一次. 寫入失敗時顯示錯誤, 畫面上的長度維持不變.
+// 監看畫面的顯示範圍長度於縮放 (例如捏合) 過程中連續改變, 畫面立即更新, 寫入設定檔則於
+// 停止改變 spanSaveDelay 毫秒後進行一次. 寫入失敗時顯示錯誤, 畫面上的長度維持不變.
 const spanSaveDelay = 400;
 let monitorSpanTimer: number | undefined;
-let historySpanTimer: number | undefined;
 
 // setMonitorSpan 變更監看畫面的顯示範圍長度 (毫秒), 所有主機共用.
 export function setMonitorSpan(ms: number): void {
@@ -401,24 +405,6 @@ export function setMonitorSpan(ms: number): void {
     const s = settingsStore.get();
     if (s) {
       backend.setMonitorSpan(s.monitor_span_ms).catch((err) => reportOperation("", err));
-    }
-  }, spanSaveDelay);
-}
-
-// setHistorySpan 變更歷史畫面的顯示範圍長度 (毫秒, 設定檔中不短於 minMS) 與是否處於顯示
-// 全部狀態.
-export function setHistorySpan(ms: number, all: boolean, minMS: number): void {
-  const v = Math.max(minMS, Math.round(ms));
-  const s = settingsStore.get();
-  if (s?.history_span_ms === v && s.history_all === all) {
-    return;
-  }
-  patchSettings({ history_span_ms: v, history_all: all });
-  window.clearTimeout(historySpanTimer);
-  historySpanTimer = window.setTimeout(() => {
-    const cur = settingsStore.get();
-    if (cur) {
-      backend.setHistorySpan(cur.history_span_ms, cur.history_all).catch((err) => reportOperation("", err));
     }
   }, spanSaveDelay);
 }
@@ -691,12 +677,18 @@ export function showRecordings(): void {
 
 // openRecording 開啟 path 的記錄檔並顯示歷史畫面.
 export function openRecording(path: string): void {
-  historyStore.set({ path, left: null, pinned: null, maxSel: null });
+  historyStore.set({ ...closedHistory, path });
   showPage("history");
 }
 
 export function setHistoryLeft(left: number): void {
   historyStore.update((h) => ({ ...h, left }));
+}
+
+// setHistorySpan 變更歷史畫面的顯示範圍長度 (毫秒) 與是否處於顯示全部狀態.
+export function setHistorySpan(ms: number, all: boolean): void {
+  const v = Math.round(ms);
+  historyStore.update((h) => (h.spanMS === v && h.all === all ? h : { ...h, spanMS: v, all }));
 }
 
 // setHistoryPinned 設定歷史畫面的固定時刻, null 為清除. 最大值卡片的選取隨之解除.

@@ -280,10 +280,6 @@ type Data struct {
 
 	// MonitorSpanMS 為監看畫面的顯示範圍長度, 所有主機共用, 單位為毫秒.
 	MonitorSpanMS int64 `json:"monitor_span_ms"`
-	// HistorySpanMS 為歷史畫面的顯示範圍長度, 單位為毫秒. HistoryAll 為歷史畫面
-	// 是否處於顯示全部狀態.
-	HistorySpanMS int64 `json:"history_span_ms"`
-	HistoryAll    bool  `json:"history_all"`
 
 	Curves []Curve `json:"curves"`
 
@@ -318,7 +314,6 @@ func Default() Data {
 		Language:        LanguageEnglish,
 		SizeUnits:       SizeUnitsBinary,
 		MonitorSpanMS:   DefaultSpanMS,
-		HistorySpanMS:   DefaultSpanMS,
 		Curves:          DefaultCurves(),
 		Hosts:           []Host{},
 		CollapsedGPUs:   map[string][]int{},
@@ -391,7 +386,6 @@ func (d *Data) sanitize() {
 		d.SizeUnits = def.SizeUnits
 	}
 	d.MonitorSpanMS = clampInt(d.MonitorSpanMS, MinSpanMS, MaxMonitorSpanMS)
-	d.HistorySpanMS = max(d.HistorySpanMS, MinSpanMS)
 
 	if d.Curves == nil {
 		d.Curves = DefaultCurves()

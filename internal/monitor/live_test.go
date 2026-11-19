@@ -187,8 +187,8 @@ func TestLive(t *testing.T) {
 			t.Logf("disconnect record: %q", r.Text)
 		}
 	}
-	t.Logf("records: samples %d, processes %d, errors %d, disconnects %d", counts[recording.KindSample],
-		counts[recording.KindProcesses], counts[recording.KindError], counts[recording.KindDisconnect])
+	t.Logf("records: samples %d, process changes %d, errors %d, disconnects %d", counts[recording.KindSample],
+		counts[recording.KindGPUProcs], counts[recording.KindError], counts[recording.KindDisconnect])
 	if counts[recording.KindDisconnect] != 1 || discIdx < 0 || discIdx == len(recs)-1 || recs[discIdx+1].Kind != recording.KindSample {
 		t.Fatal("expected one disconnect record followed by samples")
 	}

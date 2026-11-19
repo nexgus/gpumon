@@ -170,8 +170,6 @@ const settings: SettingsData = {
   language: (params.get("lang") as SettingsData["language"]) ?? "en",
   size_units: params.get("units") === "decimal" ? "decimal" : "binary",
   monitor_span_ms: Number(params.get("span") ?? 300_000),
-  history_span_ms: Number(params.get("hspan") ?? 300_000),
-  history_all: params.get("hall") === "1",
   curves: (params.get("curves")?.split(",") as SettingsData["curves"]) ?? ["util", "mem"],
   collapsed_gpus: params.get("collapse") === "1" ? { "sweetener@10.90.20.55": [2] } : {},
   collapsed_procs: params.get("pcollapse") === "1" ? ["sweetener@10.90.20.55"] : [],
@@ -782,10 +780,6 @@ export const backend: Backend = {
   },
   async setMonitorSpan(ms) {
     settings.monitor_span_ms = ms;
-  },
-  async setHistorySpan(ms, all) {
-    settings.history_span_ms = ms;
-    settings.history_all = all;
   },
   async setCurves() {},
   async setGPUCollapsed() {},

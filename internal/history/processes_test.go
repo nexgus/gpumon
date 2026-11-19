@@ -18,23 +18,20 @@ func procs(gpu int, n int, tag string) []recording.GPUProcs {
 
 func TestProcessesAt(t *testing.T) {
 	w := newRec(t, t.TempDir(), "a@b", 0, 0)
-	add(w, 0, 1000, 1, 0)
-	if err := w.AddProcesses(ts0+0, procs(0, 1, "first")); err != nil {
-		t.Fatal(err)
+	for k := 0; k < 30; k++ {
+		addProcs(w, float64(k), 1000, 1, procs(0, 1, "first"), 0)
+		if k%7 == 6 {
+			flush(t, w)
+		}
 	}
-	for k := 1; k < 30; k++ {
-		add(w, float64(k), 1000, 1, 0)
+	addProcs(w, 30, 1000, 1, procs(0, 1500, "big"), 0)
+	for k := 1; k <= 400; k++ {
+		addProcs(w, 30+float64(k)*0.01, 1000, 1, procs(0, 1500, "big"), 0)
+		if k%50 == 0 {
+			flush(t, w)
+		}
 	}
-	// 很長的程序記錄, 佔用數千筆接續記錄, 於第 30 秒.
-	add(w, 30, 1000, 1, 0)
-	if err := w.AddProcesses(ts0+30, procs(0, 1500, "big")); err != nil {
-		t.Fatal(err)
-	}
-	// 其後的記錄多到使第一次往前讀取的範圍切在這筆程序記錄中間.
-	for k := 1; k <= 4000; k++ {
-		add(w, 30+float64(k)*0.001, 1000, 1, 0)
-	}
-	add(w, 39, 1000, 1, 0)
+	addProcs(w, 39, 1000, 1, procs(0, 1500, "big"), 0)
 	flush(t, w)
 	p := w.Path()
 
@@ -45,11 +42,11 @@ func TestProcessesAt(t *testing.T) {
 	}{
 		{twall - sec, "", 0},
 		{twall, "first", twall},
-		{twall + 15*sec, "first", twall},
-		{twall + 30*sec - 1, "first", twall},
+		{twall + 15*sec + 1, "first", twall + 15*sec},
+		{twall + 30*sec - 1, "first", twall + 29*sec},
 		{twall + 30*sec, "big", twall + 30*sec},
-		{twall + 39*sec, "big", twall + 30*sec},
-		{math64Max, "big", twall + 30*sec},
+		{twall + 39*sec, "big", twall + 39*sec},
+		{math64Max, "big", twall + 39*sec},
 	}
 	for _, c := range cases {
 		got, err := ProcessesAt(p, c.at)
@@ -66,11 +63,11 @@ func TestProcessesAt(t *testing.T) {
 		if got == nil || json.Unmarshal(got.Procs, &arr) != nil || got.Time != c.time || arr[0]["cmd"] != c.tag {
 			t.Fatalf("at %d: got %+v", c.at, got)
 		}
-		if c.tag == "big" && len(arr) < 1000 {
+		if c.tag == "big" && len(arr) != 1500 {
 			t.Fatalf("big procs = %d", len(arr))
 		}
-		if arr[0]["gpu"] != float64(0) {
-			t.Fatalf("gpu member = %v", arr[0])
+		if arr[0]["gpu"] != float64(0) || arr[0]["user"] != "u" || arr[0]["mem"] != float64(1) {
+			t.Fatalf("members = %v", arr[0])
 		}
 	}
 	b, _ := json.Marshal(&ProcessList{Time: 5, Procs: json.RawMessage(`[{"pid":1,"gpu":0}]`)})
@@ -79,13 +76,15 @@ func TestProcessesAt(t *testing.T) {
 	}
 }
 
+// TestProcessesAtFileWithoutProcesses 確認沒有程序的取樣回傳空列表.
 func TestProcessesAtFileWithoutProcesses(t *testing.T) {
 	w := newRec(t, t.TempDir(), "a@b", 0, 0)
-	for k := 0; k < 10000; k++ {
-		add(w, float64(k)*0.001, 1000, 1, 0)
+	for k := 0; k < 100; k++ {
+		add(w, float64(k)*0.01, 1000, 1, 0)
 	}
 	flush(t, w)
-	if got, err := ProcessesAt(w.Path(), twall+100*sec); err != nil || got != nil {
+	got, err := ProcessesAt(w.Path(), twall+100*sec)
+	if err != nil || got == nil || string(got.Procs) != "[]" || got.Time != twall+990000 {
 		t.Fatalf("got %+v, %v", got, err)
 	}
 }
@@ -123,23 +122,17 @@ func procUtils(t *testing.T, p string, at int64) map[int]*float64 {
 
 func TestProcessesAtComputedUtil(t *testing.T) {
 	w := newRec(t, t.TempDir(), "a@b", 0, 1)
-	add(w, 0, 1000, 1, 1)
-	if err := w.AddProcesses(ts0+0, procsRaw(
+	addProcs(w, 0, 1000, 1, procsRaw(
 		`{"pid":1,"engines":{"render":0}}`,
 		`{"pid":2,"util":55}`,
 		`{"pid":3,"cycles":{"rcs":0},"total_cycles":{"rcs":0}}`,
-		`{"pid":4,"engines":{"render":500}}`)); err != nil {
-		t.Fatal(err)
-	}
-	add(w, 0.5, 1000, 1, 1)
-	if err := w.AddProcesses(ts0+0.5, procsRaw(
+		`{"pid":4,"engines":{"render":500}}`), 1)
+	addProcs(w, 0.5, 1000, 1, procsRaw(
 		`{"pid":1,"engines":{"render":150000000},"cmd":"<x>&"}`,
 		`{"pid":2,"util":60}`,
 		`{"pid":3,"cycles":{"rcs":300},"total_cycles":{"rcs":1000}}`,
 		`{"pid":4,"engines":{"render":100}}`,
-		`{"pid":5,"engines":{"render":9}}`)); err != nil {
-		t.Fatal(err)
-	}
+		`{"pid":5,"engines":{"render":9}}`), 1)
 	flush(t, w)
 	p := w.Path()
 
@@ -172,15 +165,12 @@ func TestProcessesAtComputedUtil(t *testing.T) {
 
 func TestProcessesAtDisconnectBlocksUtil(t *testing.T) {
 	w := newRec(t, t.TempDir(), "a@b", 0, 1)
-	add(w, 0, 1000, 1, 1)
-	w.AddProcesses(ts0, procsRaw(`{"pid":1,"engines":{"render":0}}`))
-	add(w, 1, 1000, 1, 1)
+	addProcs(w, 0, 1000, 1, procsRaw(`{"pid":1,"engines":{"render":0}}`), 1)
+	addProcs(w, 1, 1000, 1, procsRaw(`{"pid":1,"engines":{"render":0}}`), 1)
 	w.AddDisconnect(twall+2*sec, "lost")
 	w.BeginConnection(twall+3*sec, ts0+100)
-	add(w, 100, 1000, 1, 1)
-	w.AddProcesses(ts0+100, procsRaw(`{"pid":1,"engines":{"render":100000000}}`))
-	add(w, 100.5, 1000, 1, 1)
-	w.AddProcesses(ts0+100.5, procsRaw(`{"pid":1,"engines":{"render":200000000}}`))
+	addProcs(w, 100, 1000, 1, procsRaw(`{"pid":1,"engines":{"render":100000000}}`), 1)
+	addProcs(w, 100.5, 1000, 1, procsRaw(`{"pid":1,"engines":{"render":200000000}}`), 1)
 	flush(t, w)
 	p := w.Path()
 	if u := procUtils(t, p, twall+3*sec); u[1] != nil {
@@ -191,17 +181,16 @@ func TestProcessesAtDisconnectBlocksUtil(t *testing.T) {
 	}
 }
 
-func TestProcessesAtSparseOldRecords(t *testing.T) {
+// TestProcessesAtAcrossResetBlock 確認列表重設區塊的第一次取樣仍能以前一次取樣換算使用率.
+func TestProcessesAtAcrossResetBlock(t *testing.T) {
 	w := newRec(t, t.TempDir(), "a@b", 0, 1)
-	add(w, 0, 1000, 1, 1)
-	w.AddProcesses(ts0, procsRaw(`{"pid":1,"engines":{"render":0}}`))
-	for k := 1; k < 60; k++ {
-		add(w, float64(k), 1000, 1, 1)
+	for k := 0; k <= 15; k++ {
+		addProcs(w, float64(k*60), 1000, 1, procsRaw(fmt.Sprintf(`{"pid":1,"engines":{"render":%d}}`, k*6000000000)), 1)
+		flush(t, w)
 	}
-	add(w, 60, 1000, 1, 1)
-	w.AddProcesses(ts0+60, procsRaw(`{"pid":1,"engines":{"render":6000000000}}`))
-	flush(t, w)
-	if u := procUtils(t, w.Path(), twall+61*sec); u[1] == nil || *u[1] != 10 {
-		t.Fatalf("sparse records: %+v", u)
+	for k := 1; k <= 15; k++ {
+		if u := procUtils(t, w.Path(), twall+int64(k)*60*sec); u[1] == nil || *u[1] != 10 {
+			t.Fatalf("sample %d: %+v", k, u)
+		}
 	}
 }

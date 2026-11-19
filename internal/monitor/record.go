@@ -8,15 +8,11 @@ import (
 	"math"
 	"slices"
 	"sync"
-	"unicode/utf8"
 
 	"gpumon/internal/history"
 	"gpumon/internal/protocol"
 	"gpumon/internal/recording"
 )
-
-// maxMessageBytes 與 6.4 錯誤記錄的訊息文字上限相同.
-const maxMessageBytes = 1024
 
 // recorder 管理一台主機自使用者按下連線至轉為未連線期間的記錄檔. 自動重新連線
 // 沿用同一個 recorder, 使用者每次按下連線使用新的 recorder.
@@ -68,11 +64,8 @@ func (r *recorder) begin(cs connStart) {
 	if r.w != nil {
 		last, hasLast := r.w.LastTime()
 		if cs.reconnected && slices.Equal(r.w.GPUIDs(), cs.gpuIDs) && (!hasLast || cs.tBase >= last) {
-			r.w.AddDisconnect(cs.discTime, cs.discReason)
-			t, _ := r.w.LastTime()
-			r.pending = append(r.pending, recording.Record{
-				Kind: recording.KindDisconnect, Time: t, Text: string(truncateText(cs.discReason, maxMessageBytes)),
-			})
+			t := r.w.AddDisconnect(cs.discTime, cs.discReason)
+			r.pending = append(r.pending, recording.Record{Kind: recording.KindDisconnect, Time: t, Text: cs.discReason})
 			r.w.BeginConnection(cs.tBase, cs.tsBase)
 			return
 		}
@@ -94,8 +87,8 @@ func (r *recorder) begin(cs connStart) {
 	r.peaks = history.NewMaxTracker(w.GPUIDs())
 }
 
-// addSample 加入一筆取樣與一筆程序記錄, 回傳記錄檔所用的時刻; 沒有記錄檔
-// 時 ok 為假. procs 為各 GPU 的程序原文, 與 gpus 一一對應.
+// addSample 加入一筆取樣, 程序列表有變動時另加一筆程序變動記錄, 回傳記錄檔所用的時刻;
+// 沒有記錄檔時 ok 為假. procs 為各 GPU 的程序原文.
 func (r *recorder) addSample(ts float64, intervalMS int, gpus []protocol.GPUSample, procs []recording.GPUProcs) (t int64, ok bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -110,14 +103,15 @@ func (r *recorder) addSample(ts float64, intervalMS int, gpus []protocol.GPUSamp
 			ClockMem: i64(g.ClockMem), MemUsed: g.MemUsed,
 		}
 	}
-	t = r.w.AddSample(ts, intervalMS, rs)
-	r.pending = append(r.pending, recording.Record{
-		Kind: recording.KindSample, Time: t, IntervalMS: clampU16(intervalMS), GPUs: gpuValues(r.w.GPUIDs(), rs),
-	})
-	r.peaks.Add(&r.pending[len(r.pending)-1])
-	if err := r.w.AddProcesses(ts, procs); err != nil {
+	t, err := r.w.AddSample(ts, intervalMS, rs, procs)
+	if err != nil {
 		r.log.Warn("cannot record processes", "err", err)
 	}
+	r.pending = append(r.pending, recording.Record{
+		Kind: recording.KindSample, Time: t, IntervalMS: uint32(min(max(intervalMS, 0), math.MaxUint32)),
+		GPUs: recording.SampleValues(r.w.GPUIDs(), rs),
+	})
+	r.peaks.Add(&r.pending[len(r.pending)-1])
 	return t, true
 }
 
@@ -128,11 +122,8 @@ func (r *recorder) addError(ts float64, msg string) {
 	if r.w == nil {
 		return
 	}
-	r.w.AddError(ts, msg)
-	t, _ := r.w.LastTime()
-	r.pending = append(r.pending, recording.Record{
-		Kind: recording.KindError, Time: t, Text: string(truncateText(msg, maxMessageBytes)),
-	})
+	t := r.w.AddError(ts, msg)
+	r.pending = append(r.pending, recording.Record{Kind: recording.KindError, Time: t, Text: msg})
 }
 
 // flush 把緩衝中的記錄附加到記錄檔. 失敗時保留緩衝與 pending, 待下次重試.
@@ -215,63 +206,4 @@ func i64(v *int) *int64 {
 	}
 	x := int64(*v)
 	return &x
-}
-
-// gpuValues 依記錄檔的 GPU 順序把取樣換算為存入記錄檔的數值, 規則與
-// recording.Writer.AddSample 相同.
-func gpuValues(ids []int, gpus []recording.GPUSample) []recording.GPUValues {
-	byID := make(map[int]*recording.GPUSample, len(gpus))
-	for i := range gpus {
-		if _, dup := byID[gpus[i].ID]; !dup {
-			byID[gpus[i].ID] = &gpus[i]
-		}
-	}
-	out := make([]recording.GPUValues, len(ids))
-	for i, id := range ids {
-		g := byID[id]
-		if g == nil {
-			g = &recording.GPUSample{}
-		}
-		out[i] = recording.GPUValues{
-			ID:       id,
-			Util:     uint8(clampRange(g.Util, 0, int64(recording.NoValue8)-1, int64(recording.NoValue8))),
-			Fan:      uint8(clampRange(g.Fan, 0, int64(recording.NoValue8)-1, int64(recording.NoValue8))),
-			Enc:      uint8(clampRange(g.Enc, 0, int64(recording.NoValue8)-1, int64(recording.NoValue8))),
-			Dec:      uint8(clampRange(g.Dec, 0, int64(recording.NoValue8)-1, int64(recording.NoValue8))),
-			Temp:     int16(clampRange(g.Temp, math.MinInt16, int64(recording.NoValueI16)-1, int64(recording.NoValueI16))),
-			PowerW:   uint16(clampRange(g.PowerW, 0, int64(recording.NoValue16)-1, int64(recording.NoValue16))),
-			ClockGPU: uint16(clampRange(g.ClockGPU, 0, int64(recording.NoValue16)-1, int64(recording.NoValue16))),
-			ClockMem: uint16(clampRange(g.ClockMem, 0, int64(recording.NoValue16)-1, int64(recording.NoValue16))),
-			MemUsed:  recording.NoValue64,
-		}
-		if g.MemUsed != nil {
-			out[i].MemUsed = min(*g.MemUsed, recording.NoValue64-1)
-		}
-	}
-	return out
-}
-
-// clampRange 把 v 限制於 [lo, hi], nil 時回傳 none.
-func clampRange(v *int64, lo, hi, none int64) int64 {
-	if v == nil {
-		return none
-	}
-	return min(max(*v, lo), hi)
-}
-
-func clampU16(v int) uint16 {
-	return uint16(min(max(v, 0), math.MaxUint16))
-}
-
-// truncateText 把文字截短至不超過 limit 位元組, 自結尾刪去整個 UTF-8 字元, 與
-// 記錄檔的截短方式相同.
-func truncateText(s string, limit int) []byte {
-	if len(s) <= limit {
-		return []byte(s)
-	}
-	cut := limit
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
-	}
-	return []byte(s[:cut])
 }

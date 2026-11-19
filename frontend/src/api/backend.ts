@@ -79,7 +79,6 @@ export const backend: Backend = {
   setLanguage: (v) => settings.SetLanguage(v),
   setSizeUnits: (v) => settings.SetSizeUnits(v),
   setMonitorSpan: (ms) => settings.SetMonitorSpan(ms),
-  setHistorySpan: (ms, all) => settings.SetHistorySpan(ms, all),
   setCurves: (curves) => settings.SetCurves(curves),
   setGPUCollapsed: (hostID, gpuID, collapsed) => settings.SetGPUCollapsed(hostID, gpuID, collapsed),
   setProcessesCollapsed: (hostID, collapsed) => settings.SetProcessesCollapsed(hostID, collapsed),

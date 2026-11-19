@@ -1,6 +1,7 @@
 package recording
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -14,8 +15,15 @@ func writeRecording(t *testing.T, dataDir, host string, tw int64) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w.AddSample(1730700000.623, 500, []GPUSample{{ID: 0, Util: i64(50)}, {ID: 1, Temp: i64(60)}})
+	if _, err := w.AddSample(1730700000.623, 500, []GPUSample{{ID: 0, Util: i64(50)}, {ID: 1, Temp: i64(60)}},
+		[]GPUProcs{rawProcs(0, `{"pid":1,"user":"u"}`)}); err != nil {
+		t.Fatal(err)
+	}
 	w.AddError(1730700000.7, "boom")
+	w.Flush()
+	if _, err := w.AddSample(1730700001.623, 500, nil, []GPUProcs{rawProcs(0, `{"pid":1,"user":"v"}`)}); err != nil {
+		t.Fatal(err)
+	}
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -52,6 +60,12 @@ func TestRehost(t *testing.T) {
 	}
 	if !reflect.DeepEqual(readAll(t, fa), origA) {
 		t.Errorf("records changed")
+	}
+	if fa.Version() != 2 {
+		t.Errorf("version = %d", fa.Version())
+	}
+	if cur, prev := procsAt(t, fa, math.MaxInt64); cur != `[{"pid":1,"user":"v","gpu":0}]` || prev != `[{"pid":1,"user":"u","gpu":0}]` {
+		t.Errorf("processes after rehost %s / %s", cur, prev)
 	}
 	if h := open(t, movedB).Header(); h.Host != "bob@s v:2222" {
 		t.Errorf("header = %+v", h)

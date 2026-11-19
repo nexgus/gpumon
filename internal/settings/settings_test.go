@@ -36,8 +36,8 @@ func TestDefaults(t *testing.T) {
 	if d.SizeUnits != SizeUnitsBinary {
 		t.Errorf("size units = %v", d.SizeUnits)
 	}
-	if d.MonitorSpanMS != 300000 || d.HistorySpanMS != 300000 || d.HistoryAll {
-		t.Errorf("spans = %d %d %v", d.MonitorSpanMS, d.HistorySpanMS, d.HistoryAll)
+	if d.MonitorSpanMS != 300000 {
+		t.Errorf("monitor span = %d", d.MonitorSpanMS)
 	}
 	if !reflect.DeepEqual(d.Curves, []Curve{CurveUtil, CurveMem}) {
 		t.Errorf("curves = %v", d.Curves)
@@ -66,7 +66,6 @@ func TestRoundTrip(t *testing.T) {
 	must(s.SetLanguage(LanguageTraditionalChinese))
 	must(s.SetSizeUnits(SizeUnitsDecimal))
 	must(s.SetMonitorSpan(MaxMonitorSpanMS))
-	must(s.SetHistorySpan(7_654_321, true))
 	must(s.SetCurves([]Curve{CurveTemp, CurveUtil, CurveClockMem}))
 	must(s.SetGPUCollapsed("alice@10.0.0.5:2222", 1, true))
 	must(s.SetGPUCollapsed("alice@10.0.0.5:2222", 0, true))
@@ -94,8 +93,8 @@ func TestRoundTrip(t *testing.T) {
 		t.Errorf("size units = %v", s2.Snapshot().SizeUnits)
 	}
 	h, _ := s2.Host("alice@10.0.0.5:2222")
-	if d := s2.Snapshot(); d.MonitorSpanMS != MaxMonitorSpanMS || d.HistorySpanMS != 7_654_321 || !d.HistoryAll {
-		t.Errorf("spans = %d %d %v", d.MonitorSpanMS, d.HistorySpanMS, d.HistoryAll)
+	if d := s2.Snapshot(); d.MonitorSpanMS != MaxMonitorSpanMS {
+		t.Errorf("monitor span = %d", d.MonitorSpanMS)
 	}
 	if !s2.ProcsCollapsed("alice@10.0.0.5:2222") || s2.ProcsCollapsed("gpu02") {
 		t.Errorf("procs %v", s2.Snapshot().CollapsedProcs)
@@ -266,14 +265,6 @@ func TestSetterRanges(t *testing.T) {
 			t.Errorf("monitor span %d: %v", ms, err)
 		}
 	}
-	for _, ms := range []int64{59_999, 0, -5} {
-		if err := s.SetHistorySpan(ms, false); !errors.Is(err, ErrInvalidValue) {
-			t.Errorf("history span %d: %v", ms, err)
-		}
-	}
-	if err := s.SetHistorySpan(30*86_400_000, true); err != nil {
-		t.Errorf("history span has no upper limit in the settings file: %v", err)
-	}
 	if err := s.SetAppearance("blue"); err == nil {
 		t.Error("bad appearance accepted")
 	}
@@ -307,7 +298,7 @@ func TestSetterRanges(t *testing.T) {
 	if err := s.SetMaximaCollapsed("", true); err == nil {
 		t.Error("empty host id accepted for maxima")
 	}
-	if d := s.Snapshot(); d.MonitorSpanMS != 123_456 || d.HistorySpanMS != 30*86_400_000 || !d.HistoryAll {
+	if d := s.Snapshot(); d.MonitorSpanMS != 123_456 {
 		t.Errorf("failed setters must not change state: %+v", d)
 	}
 }
@@ -353,8 +344,8 @@ func TestLoadOutOfRangeAndInvalid(t *testing.T) {
 	if d.Appearance != AppearanceSystem || d.Language != LanguageEnglish || d.SizeUnits != SizeUnitsBinary {
 		t.Errorf("enums not defaulted: %v %v %v", d.Appearance, d.Language, d.SizeUnits)
 	}
-	if d.MonitorSpanMS != DefaultSpanMS || d.HistorySpanMS != DefaultSpanMS || d.HistoryAll {
-		t.Errorf("invalid legacy ranges must give defaults: %d %d %v", d.MonitorSpanMS, d.HistorySpanMS, d.HistoryAll)
+	if d.MonitorSpanMS != DefaultSpanMS {
+		t.Errorf("invalid legacy range must give default: %d", d.MonitorSpanMS)
 	}
 	if !reflect.DeepEqual(d.Curves, []Curve{CurveUtil, CurvePower}) {
 		t.Errorf("curves = %v", d.Curves)
@@ -382,18 +373,18 @@ func TestLoadOutOfRangeAndInvalid(t *testing.T) {
 		t.Errorf("collapsed = %v", d.CollapsedGPUs)
 	}
 
-	for in, want := range map[string][2]int64{
-		`"monitor_span_ms": 1000, "history_span_ms": 1000`:               {60_000, 60_000},
-		`"monitor_span_ms": -5, "history_span_ms": 0`:                    {60_000, 60_000},
-		`"monitor_span_ms": 99999999999, "history_span_ms": 99999999999`: {86_400_000, 99999999999},
-		`"monitor_span_ms": 90000, "history_span_ms": 4000000`:           {90_000, 4_000_000},
-		`"monitor_span_ms": "5m", "history_span_ms": 1.5`:                {DefaultSpanMS, DefaultSpanMS},
-		`"version": 1`: {DefaultSpanMS, DefaultSpanMS},
+	for in, want := range map[string]int64{
+		`"monitor_span_ms": 1000`:        60_000,
+		`"monitor_span_ms": -5`:          60_000,
+		`"monitor_span_ms": 99999999999`: 86_400_000,
+		`"monitor_span_ms": 90000`:       90_000,
+		`"monitor_span_ms": "5m"`:        DefaultSpanMS,
+		`"version": 1`:                   DefaultSpanMS,
 	} {
 		writeFile(t, dir, "{"+in+"}")
 		d := mustOpen(t, dir).Snapshot()
-		if got := [2]int64{d.MonitorSpanMS, d.HistorySpanMS}; got != want {
-			t.Errorf("%s -> %v, want %v", in, got, want)
+		if d.MonitorSpanMS != want {
+			t.Errorf("%s -> %d, want %d", in, d.MonitorSpanMS, want)
 		}
 	}
 
@@ -412,10 +403,10 @@ func TestLoadLegacyRanges(t *testing.T) {
 	  "hosts": [{"addr": "a", "user": "u", "range": "3h", "interval_ms": 2000}]
 	}`)
 	s := mustOpen(t, dir)
-	if d := s.Snapshot(); d.MonitorSpanMS != 900_000 || d.HistorySpanMS != DefaultSpanMS || d.HistoryAll {
+	if d := s.Snapshot(); d.MonitorSpanMS != 900_000 {
 		t.Errorf("shared_range not carried over: %+v", d)
 	}
-	if err := s.SetHistorySpan(60_000, false); err != nil {
+	if err := s.SetMonitorSpan(900_000); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(s.Path())
@@ -432,27 +423,49 @@ func TestLoadLegacyRanges(t *testing.T) {
 	}
 
 	cases := []struct {
-		in       string
-		mon, his int64
-		all      bool
+		in  string
+		mon int64
 	}{
-		{`{"monitor_range": "24h", "history_range": "12h"}`, 86_400_000, 43_200_000, false},
-		{`{"monitor_range": "1m", "history_range": "all"}`, 60_000, DefaultSpanMS, true},
-		{`{"shared_range": "all", "monitor_range": "1h"}`, DefaultSpanMS, DefaultSpanMS, false},
-		{`{"shared_range": "30m", "monitor_range": "6h"}`, 21_600_000, DefaultSpanMS, false},
-		{`{"shared_range": "30m"}`, 1_800_000, DefaultSpanMS, false},
-		{`{"monitor_range": "all", "history_range": "7m"}`, DefaultSpanMS, DefaultSpanMS, false},
-		{`{"monitor_range": 5, "history_range": ["all"]}`, DefaultSpanMS, DefaultSpanMS, false},
-		{`{"monitor_span_ms": 120000, "monitor_range": "24h", "shared_range": "3h"}`, 120_000, DefaultSpanMS, false},
-		{`{"history_span_ms": 180000, "history_range": "all"}`, DefaultSpanMS, 180_000, false},
-		{`{"history_all": false, "history_range": "all"}`, DefaultSpanMS, DefaultSpanMS, false},
-		{`{"history_span_ms": 180000, "history_all": true, "history_range": "60m"}`, DefaultSpanMS, 180_000, true},
+		{`{"monitor_range": "24h"}`, 86_400_000},
+		{`{"monitor_range": "1m"}`, 60_000},
+		{`{"shared_range": "all", "monitor_range": "1h"}`, DefaultSpanMS},
+		{`{"shared_range": "30m", "monitor_range": "6h"}`, 21_600_000},
+		{`{"shared_range": "30m"}`, 1_800_000},
+		{`{"monitor_range": "all"}`, DefaultSpanMS},
+		{`{"monitor_range": 5}`, DefaultSpanMS},
+		{`{"monitor_span_ms": 120000, "monitor_range": "24h", "shared_range": "3h"}`, 120_000},
 	}
 	for _, c := range cases {
 		writeFile(t, dir, c.in)
 		d := mustOpen(t, dir).Snapshot()
-		if d.MonitorSpanMS != c.mon || d.HistorySpanMS != c.his || d.HistoryAll != c.all {
-			t.Errorf("%s -> %d %d %v, want %d %d %v", c.in, d.MonitorSpanMS, d.HistorySpanMS, d.HistoryAll, c.mon, c.his, c.all)
+		if d.MonitorSpanMS != c.mon {
+			t.Errorf("%s -> %d, want %d", c.in, d.MonitorSpanMS, c.mon)
+		}
+	}
+}
+
+// 歷史畫面的顯示範圍不存於設定檔, 舊版的相關成員讀取時略過, 寫入後不再出現.
+func TestLoadIgnoresHistoryRange(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, `{
+	  "version": 1,
+	  "monitor_span_ms": 120000,
+	  "history_span_ms": 180000, "history_all": true, "history_range": "60m"
+	}`)
+	s := mustOpen(t, dir)
+	if d := s.Snapshot(); d.MonitorSpanMS != 120_000 {
+		t.Errorf("monitor span = %d", d.MonitorSpanMS)
+	}
+	if err := s.SetMonitorSpan(150_000); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(s.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"history_span_ms", "history_all", "history_range"} {
+		if strings.Contains(string(raw), key) {
+			t.Errorf("rewritten file still has %s: %s", key, raw)
 		}
 	}
 }

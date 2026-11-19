@@ -153,11 +153,11 @@ func TestNoValueExcludedFromStats(t *testing.T) {
 	w := newRec(t, t.TempDir(), "a@b", 0, 0)
 	mem := func(v uint64) *uint64 { return &v }
 	// 前兩筆同一像素範圍: 第一筆使用率有值記憶體無值, 第二筆兩者皆有值.
-	w.AddSample(ts0+0, 1000, []recording.GPUSample{{ID: 0, Util: iv(40)}})
-	w.AddSample(ts0+1, 1000, []recording.GPUSample{{ID: 0, Util: iv(60), MemUsed: mem(1000)}})
+	w.AddSample(ts0+0, 1000, []recording.GPUSample{{ID: 0, Util: iv(40)}}, nil)
+	w.AddSample(ts0+1, 1000, []recording.GPUSample{{ID: 0, Util: iv(60), MemUsed: mem(1000)}}, nil)
 	// 後兩筆同一像素範圍: 全無值.
-	w.AddSample(ts0+2, 1000, []recording.GPUSample{{ID: 0}})
-	w.AddSample(ts0+3, 1000, []recording.GPUSample{{ID: 0}})
+	w.AddSample(ts0+2, 1000, []recording.GPUSample{{ID: 0}}, nil)
+	w.AddSample(ts0+3, 1000, []recording.GPUSample{{ID: 0}}, nil)
 	flush(t, w)
 	r := query(t, []string{w.Path()}, twall, twall+4*sec-1, 2, FieldUtil, FieldMemUsed)
 	if !r.Binned {
@@ -180,11 +180,11 @@ func TestNoValueExcludedFromStats(t *testing.T) {
 func TestQueryStats(t *testing.T) {
 	w := newRec(t, t.TempDir(), "a@b", 0, 0)
 	mem := func(v uint64) *uint64 { return &v }
-	w.AddSample(ts0+0, 1000, []recording.GPUSample{{ID: 0, Util: iv(40)}})
-	w.AddSample(ts0+1, 1000, []recording.GPUSample{{ID: 0, Util: iv(60), MemUsed: mem(1000)}})
-	w.AddSample(ts0+2, 1000, []recording.GPUSample{{ID: 0}})
-	w.AddSample(ts0+3, 1000, []recording.GPUSample{{ID: 0, Util: iv(7)}})
-	w.AddSample(ts0+6, 1000, []recording.GPUSample{{ID: 0, Util: iv(9)}})
+	w.AddSample(ts0+0, 1000, []recording.GPUSample{{ID: 0, Util: iv(40)}}, nil)
+	w.AddSample(ts0+1, 1000, []recording.GPUSample{{ID: 0, Util: iv(60), MemUsed: mem(1000)}}, nil)
+	w.AddSample(ts0+2, 1000, []recording.GPUSample{{ID: 0}}, nil)
+	w.AddSample(ts0+3, 1000, []recording.GPUSample{{ID: 0, Util: iv(7)}}, nil)
+	w.AddSample(ts0+6, 1000, []recording.GPUSample{{ID: 0, Util: iv(9)}}, nil)
 	flush(t, w)
 	paths := []string{w.Path()}
 	q := Query{From: twall, To: twall + 4*sec - 1, Width: 2, Fields: []Field{FieldUtil, FieldMemUsed}, Stats: true}

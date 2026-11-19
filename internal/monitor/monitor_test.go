@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"math"
@@ -590,7 +591,7 @@ func kinds(recs []recording.Record) []recording.Kind {
 const (
 	kS = recording.KindSample
 	kE = recording.KindError
-	kP = recording.KindProcesses
+	kP = recording.KindGPUProcs
 	kD = recording.KindDisconnect
 )
 
@@ -620,11 +621,12 @@ func TestRecordingCreatedOnFirstSample(t *testing.T) {
 	if h := f.Header(); h.Host != "alice@gpu01" || h.TS0 != 1000 || h.TWall0 != e.clock.now().UnixMicro() {
 		t.Fatalf("header %+v", h)
 	}
-	if got, want := kinds(recs), []recording.Kind{kS, kP, kE, kS, kP}; !reflect.DeepEqual(got, want) {
+	// 取樣不含程序, 程序列表沒有變動, 不寫程序變動記錄.
+	if got, want := kinds(recs), []recording.Kind{kS, kE, kS}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("records %v, want %v", got, want)
 	}
-	if recs[2].Text != "nvml timeout" {
-		t.Fatalf("error text %q", recs[2].Text)
+	if recs[1].Text != "nvml timeout" {
+		t.Fatalf("error text %q", recs[1].Text)
 	}
 	if len(e.m.ActiveRecordings()) != 0 {
 		t.Fatal("recording still active after disconnect")
@@ -659,15 +661,11 @@ func TestRecordingFlushesInBatches(t *testing.T) {
 	e.waitState(id, StateConnected)
 	l.send(sampleMsg(1000, 1, []int{0}))
 	e.waitLiveTime(id, e.clock.now().UnixMicro())
-	f, err := recording.Open(e.status(id).Recording)
-	if err != nil {
-		t.Fatal(err)
+	path := e.status(id).Recording
+	if _, recs := readAll(t, path); len(recs) != 0 {
+		t.Fatalf("%d records written before the batch interval", len(recs))
 	}
-	defer f.Close()
-	if n, _ := f.Count(); n != 0 {
-		t.Fatalf("%d records written before the batch interval", n)
-	}
-	e.eventually("batch write", time.Second, func() bool { n, _ := f.Count(); return n == 2 })
+	e.eventually("batch write", time.Second, func() bool { _, recs := readAll(t, path); return len(recs) == 1 })
 }
 
 func TestRecordingContinuesAfterReconnect(t *testing.T) {
@@ -701,16 +699,19 @@ func TestRecordingContinuesAfterReconnect(t *testing.T) {
 		t.Fatalf("files %v", files)
 	}
 	_, recs := readAll(t, path)
-	// 每筆取樣皆附一筆程序記錄, 斷線記錄之後亦同.
-	if got, want := kinds(recs), []recording.Kind{kS, kP, kS, kP, kD, kS, kP}; !reflect.DeepEqual(got, want) {
+	// 程序只在第一次出現時寫入; 斷線記錄不重設比較對象, 重新連線後程序不變即不寫入.
+	if got, want := kinds(recs), []recording.Kind{kS, kP, kS, kD, kS}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("records %v, want %v", got, want)
 	}
-	d := recs[4]
+	d := recs[3]
 	if d.Time != tDisc || d.Text != "Connection lost: EOF" {
 		t.Fatalf("disconnect record %+v", d)
 	}
-	if recs[5].Time != t1 {
-		t.Fatalf("first sample after reconnecting at %d, want %d", recs[5].Time, t1)
+	if recs[4].Time != t1 {
+		t.Fatalf("first sample after reconnecting at %d, want %d", recs[4].Time, t1)
+	}
+	if p, err := history.ProcessesAt(path, t1); err != nil || p == nil || p.Time != t1 || !strings.Contains(string(p.Procs), `"pid":7`) {
+		t.Fatalf("processes after reconnecting %+v %v", p, err)
 	}
 }
 
@@ -765,11 +766,11 @@ func TestRecordingNewFileConditions(t *testing.T) {
 				t.Fatalf("no new recording: %q", second)
 			}
 			_, recs := readAll(t, first)
-			if got, want := kinds(recs), []recording.Kind{kS, kP, kS, kP}; !reflect.DeepEqual(got, want) {
+			if got, want := kinds(recs), []recording.Kind{kS, kS}; !reflect.DeepEqual(got, want) {
 				t.Fatalf("first file records %v, want %v", got, want)
 			}
 			f, recs := readAll(t, second)
-			if got, want := kinds(recs), []recording.Kind{kS, kP}; !reflect.DeepEqual(got, want) {
+			if got, want := kinds(recs), []recording.Kind{kS}; !reflect.DeepEqual(got, want) {
 				t.Fatalf("second file records %v, want %v", got, want)
 			}
 			if f.Header().TWall0 != t1 {
@@ -779,7 +780,9 @@ func TestRecordingNewFileConditions(t *testing.T) {
 	}
 }
 
-func TestProcessRecordPerSample(t *testing.T) {
+// TestProcessChangesPerSample 確認程序列表只在有變動的取樣寫入程序變動記錄, 且每次取樣的
+// 列表皆可還原.
+func TestProcessChangesPerSample(t *testing.T) {
 	e := newEnv(t, testTiming())
 	id := e.addHost("alice", "gpu01")
 	ls := newLinks()
@@ -797,8 +800,8 @@ func TestProcessRecordPerSample(t *testing.T) {
 	send(2, 10)
 	send(3, 10, 11)
 	send(4, 11, 10)
-	send(63.5, 10, 11)
-	send(64, 10, 11)
+	send(63.5, 10)
+	send(64, 10)
 	e.waitLiveTime(id, t0+64_000_000)
 	path := e.status(id).Recording
 	e.m.Disconnect(id)
@@ -809,8 +812,18 @@ func TestProcessRecordPerSample(t *testing.T) {
 			procTimes = append(procTimes, (r.Time-t0)/1000)
 		}
 	}
-	if want := []int64{0, 1000, 2000, 3000, 4000, 63500, 64000}; !reflect.DeepEqual(procTimes, want) {
-		t.Fatalf("process records at %v ms, want %v", procTimes, want)
+	if want := []int64{0, 3000, 63500}; !reflect.DeepEqual(procTimes, want) {
+		t.Fatalf("process change records at %v ms, want %v", procTimes, want)
+	}
+	for _, c := range []struct {
+		ms   int64
+		pids int
+	}{{0, 2}, {2000, 2}, {3000, 4}, {4000, 4}, {63500, 2}, {64000, 2}} {
+		p, err := history.ProcessesAt(path, t0+c.ms*1000)
+		var arr []map[string]any
+		if err != nil || p == nil || json.Unmarshal(p.Procs, &arr) != nil || len(arr) != c.pids || p.Time != t0+c.ms*1000 {
+			t.Fatalf("processes at %d ms: %+v %v", c.ms, p, err)
+		}
 	}
 }
 
@@ -842,13 +855,13 @@ func TestFixedInterval(t *testing.T) {
 	path := e.status(id).Recording
 	e.m.Disconnect(id)
 	_, recs := readAll(t, path)
-	var ivs []uint16
+	var ivs []uint32
 	for _, r := range recs {
 		if r.Kind == kS {
 			ivs = append(ivs, r.IntervalMS)
 		}
 	}
-	if want := []uint16{200, 200}; !reflect.DeepEqual(ivs, want) {
+	if want := []uint32{200, 200}; !reflect.DeepEqual(ivs, want) {
 		t.Fatalf("intervals %v, want %v", ivs, want)
 	}
 	e.m.Connect(id)
@@ -998,7 +1011,7 @@ func TestQueryAfterAutoReconnect(t *testing.T) {
 	// 記錄檔照舊接續寫入並留有斷線記錄.
 	e.m.recorderRefFor(id).flush()
 	_, recs := readAll(t, e.status(id).Recording)
-	if got, want := kinds(recs), []recording.Kind{kS, kP, kS, kP, kS, kP, kS, kP, kS, kP, kD, kS, kP, kS, kP}; !reflect.DeepEqual(got, want) {
+	if got, want := kinds(recs), []recording.Kind{kS, kS, kS, kS, kS, kD, kS, kS}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("records %v, want %v", got, want)
 	}
 
@@ -1036,15 +1049,12 @@ func TestCloseSavesPendingSamples(t *testing.T) {
 	l.send(sampleMsg(1001, 1, []int{0}))
 	e.waitLiveTime(id, t0+1_000_000)
 	path := e.status(id).Recording
-	if f, _ := recording.Open(path); f != nil {
-		if n, _ := f.Count(); n != 0 {
-			t.Fatalf("%d records saved before Close", n)
-		}
-		f.Close()
+	if _, recs := readAll(t, path); len(recs) != 0 {
+		t.Fatalf("%d records saved before Close", len(recs))
 	}
 	e.m.Close()
 	_, recs := readAll(t, path)
-	if got, want := kinds(recs), []recording.Kind{kS, kP, kS, kP}; !reflect.DeepEqual(got, want) {
+	if got, want := kinds(recs), []recording.Kind{kS, kS}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("records after Close %v, want %v", got, want)
 	}
 	if !l.closed() {
@@ -1089,13 +1099,17 @@ func TestIntelUtilizationComputedLocally(t *testing.T) {
 	path := e.status(id).Recording
 	e.m.Disconnect(id)
 	_, recs := readAll(t, path)
-	var utils []uint8
+	var utils []string
 	for _, r := range recs {
 		if r.Kind == kS {
-			utils = append(utils, r.GPUs[1].Util)
+			if v, ok := r.GPUs[1].Value(recording.MetricUtil); ok {
+				utils = append(utils, fmt.Sprint(v))
+			} else {
+				utils = append(utils, "none")
+			}
 		}
 	}
-	if want := []uint8{recording.NoValue8, 50}; !reflect.DeepEqual(utils, want) {
+	if want := []string{"none", "50"}; !reflect.DeepEqual(utils, want) {
 		t.Fatalf("recorded intel utilization %v, want %v", utils, want)
 	}
 }

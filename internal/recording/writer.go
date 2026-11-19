@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 )
 
 // HostDirName 將主機識別 ("user@addr" 或 "user@addr:port") 轉為主機目錄名稱, 不屬於英文
@@ -66,26 +66,38 @@ func HostDir(dataDir, host string) string {
 	return filepath.Join(dataDir, "history", HostDirName(host))
 }
 
-// Writer 負責建立記錄檔並於檔尾附加記錄. Add 系列函數只寫入記憶體緩衝,
-// Flush 將累積的記錄以一次寫入附加到檔尾, 呼叫端應每 5 秒呼叫一次.
-// Writer 可由多個 goroutine 同時使用.
+// Writer 負責建立版本 2 的記錄檔並於檔尾附加區塊. Add 系列函數只把記錄寫入記憶體緩衝,
+// Flush 把累積的記錄寫成一個區塊, 以一次寫入附加到檔尾. Writer 可由多個 goroutine 同時使用.
 type Writer struct {
 	mu       sync.Mutex
 	f        *os.File
 	path     string
-	n        int
-	r        int
 	ids      []int
 	tBase    int64
 	tsBase   float64
 	lastTime int64
 	hasLast  bool
-	size     int64
+	// size 為檔案長度, base 為記錄區的起點.
+	size int64
+	base int64
+	// buf 為尚未存檔的記錄, bufFirst 與 bufLast 為其第一筆與最後一筆的時刻, bufReset
+	// 表示這些記錄將寫成列表重設區塊.
 	buf      []byte
-	closed   bool
+	bufFirst int64
+	bufLast  int64
+	bufReset bool
+	// prevTotal 為前一個區塊的總長度, lastReset 為最近的列表重設區塊於記錄區內的位移.
+	prevTotal uint32
+	lastReset int64
+	// resetTime 為最近一個列表重設區塊第一筆記錄的時刻, hasReset 為假表示尚未決定任何列表重設區塊.
+	resetTime int64
+	hasReset  bool
+	// gpuPrev 為 GPU 程序列表的比較對象.
+	gpuPrev map[gpuKey]*GPUProc
+	closed  bool
 }
 
-// Create 於 `<dataDir>/history/<主機目錄>/` 建立記錄檔並寫入固定區與說明區.
+// Create 於 `<dataDir>/history/<主機目錄>/` 建立版本 2 的記錄檔並寫入固定區與說明區.
 // 呼叫端應於收到第一筆 sample 訊息時才呼叫, 且 GPU 張數為 0 時回傳 ErrNoGPU, 不建立檔案.
 // 檔名由 TWall0 換算為本機時區, 同名時依序加 `-2`, `-3`.
 func Create(dataDir string, h Header) (*Writer, error) {
@@ -130,7 +142,7 @@ func Create(dataDir string, h Header) (*Writer, error) {
 	}
 	fixed := make([]byte, fixedSize, fixedSize+len(meta))
 	copy(fixed, magic)
-	le.PutUint16(fixed[8:], formatVersion)
+	le.PutUint16(fixed[8:], version2)
 	le.PutUint16(fixed[10:], uint16(len(ids)))
 	le.PutUint32(fixed[12:], uint32(len(meta)))
 	out := append(fixed, meta...)
@@ -140,14 +152,14 @@ func Create(dataDir string, h Header) (*Writer, error) {
 		return nil, err
 	}
 	return &Writer{
-		f:      f,
-		path:   path,
-		n:      len(ids),
-		r:      recordHeaderSize + gpuBlockSize*len(ids),
-		ids:    ids,
-		tBase:  h.TWall0,
-		tsBase: h.TS0,
-		size:   int64(len(out)),
+		f:       f,
+		path:    path,
+		ids:     ids,
+		tBase:   h.TWall0,
+		tsBase:  h.TS0,
+		size:    int64(len(out)),
+		base:    int64(len(out)),
+		gpuPrev: map[gpuKey]*GPUProc{},
 	}, nil
 }
 
@@ -165,9 +177,9 @@ func encodeHeader(h Header) ([]byte, error) {
 func (w *Writer) Path() string { return w.path }
 
 // NumGPUs 回傳 GPU 張數 N.
-func (w *Writer) NumGPUs() int { return w.n }
+func (w *Writer) NumGPUs() int { return len(w.ids) }
 
-// GPUIDs 回傳說明區 devices.gpus 各元素的 id, 順序與取樣記錄的 GPU 區塊相同.
+// GPUIDs 回傳說明區 devices.gpus 各元素的 id, 順序與取樣記錄的 gpus 相同.
 func (w *Writer) GPUIDs() []int { return append([]int(nil), w.ids...) }
 
 // BeginConnection 設定新一次連線的時間基準, 即本機收到該次連線第一筆 sample 訊息的時刻與該筆的 ts.
@@ -189,21 +201,14 @@ func (w *Writer) timeLocked(ts float64) int64 {
 	return w.tBase + int64(math.Round((ts-w.tsBase)*1000000))
 }
 
-// LastTime 回傳最後一筆記錄 (含尚未 Flush 者) 的時刻; 尚無記錄時 ok 為假.
+// LastTime 回傳最後一筆記錄 (含尚未存檔者) 的時刻; 尚無記錄時 ok 為假.
 func (w *Writer) LastTime() (t int64, ok bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.lastTime, w.hasLast
 }
 
-// Pending 回傳尚未 Flush 的位元組數.
-func (w *Writer) Pending() int {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return len(w.buf)
-}
-
-// clampTime 使時刻不早於前一筆記錄, 以維持記錄區各筆時刻不遞減, 並更新最後時刻.
+// clampTime 使時刻不早於前一筆記錄, 以維持各筆時刻不遞減, 並更新最後時刻.
 func (w *Writer) clampTime(t int64) int64 {
 	if w.hasLast && t < w.lastTime {
 		t = w.lastTime
@@ -212,213 +217,78 @@ func (w *Writer) clampTime(t int64) int64 {
 	return t
 }
 
-func (w *Writer) newRecord(kind Kind, t int64, v uint16) []byte {
-	start := len(w.buf)
-	w.buf = append(w.buf, make([]byte, w.r)...)
-	rec := w.buf[start:]
-	rec[0] = byte(kind)
-	le.PutUint64(rec[1:], uint64(t))
-	le.PutUint16(rec[9:], v)
-	return rec
+// addRecord 把一筆記錄加入緩衝. 緩衝為空時, 這筆記錄即下一個區塊的第一筆記錄, 於此時決定該
+// 區塊是否為列表重設區塊; 是的話立即把比較對象設為空列表, 使該區塊內的程序變動皆以空列表為
+// 對象. 存檔失敗時緩衝保留, 此決定隨之保留.
+func (w *Writer) addRecord(r *Record) {
+	if len(w.buf) == 0 {
+		w.bufFirst = r.Time
+		w.bufReset = !w.hasReset || r.Time-w.resetTime >= resetInterval
+		if w.bufReset {
+			w.resetTime, w.hasReset = r.Time, true
+			w.gpuPrev = map[gpuKey]*GPUProc{}
+		}
+	}
+	w.bufLast = r.Time
+	w.buf = appendRecord(w.buf, r)
 }
 
-// AddSample 加入一筆取樣記錄, 回傳其時刻. gpus 以 id 與說明區的 GPU 配對,
-// 缺少的 GPU 與省略的欄位存入代表無值的數值, 超出範圍的數值存入最接近的有效值.
-func (w *Writer) AddSample(ts float64, intervalMS int, gpus []GPUSample) int64 {
+// AddSample 加入一筆取樣記錄, 並在 GPU 程序列表與前一次取樣不同時緊接加入一筆 GPU 程序變動
+// 記錄, 回傳兩者的時刻. gpus 以 id 與說明區的 GPU 配對, 缺少的 GPU 所有欄位皆無值. procs 為
+// 各 GPU 的 procs 陣列; 不是 JSON 物件或沒有整數 pid 的元素不列入程序列表, 並回報於 err,
+// 其他記錄照常加入.
+func (w *Writer) AddSample(ts float64, intervalMS int, gpus []GPUSample, procs []GPUProcs) (int64, error) {
+	var cur []GPUProc
+	var errs []error
+	for _, gp := range procs {
+		for _, raw := range gp.Procs {
+			p, err := parseGPUProc(int64(gp.GPU), raw)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			cur = append(cur, p)
+		}
+	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	t := w.clampTime(w.timeLocked(ts))
-	rec := w.newRecord(KindSample, t, clampU16(intervalMS))
-	byID := make(map[int]*GPUSample, len(gpus))
-	for i := range gpus {
-		if _, dup := byID[gpus[i].ID]; !dup {
-			byID[gpus[i].ID] = &gpus[i]
+	iv := uint32(min(max(intervalMS, 0), math.MaxUint32))
+	w.addRecord(&Record{Kind: KindSample, Time: t, IntervalMS: iv, GPUs: SampleValues(w.ids, gpus)})
+	if changes := diffGPU(w.gpuPrev, cur); len(changes) > 0 {
+		w.addRecord(&Record{Kind: KindGPUProcs, Time: t, GPUProcs: changes})
+	}
+	next := make(map[gpuKey]*GPUProc, len(cur))
+	for i := range cur {
+		if k := cur[i].key(); next[k] == nil {
+			next[k] = &cur[i]
 		}
 	}
-	for i, id := range w.ids {
-		blk := rec[recordHeaderSize+gpuBlockSize*i:][:gpuBlockSize]
-		g := byID[id]
-		if g == nil {
-			g = &GPUSample{}
-		}
-		blk[0] = clampU8(g.Util)
-		blk[1] = clampU8(g.Fan)
-		blk[2] = clampU8(g.Enc)
-		blk[3] = clampU8(g.Dec)
-		le.PutUint16(blk[4:], uint16(clampI16(g.Temp)))
-		le.PutUint16(blk[6:], clampU16p(g.PowerW))
-		le.PutUint16(blk[8:], clampU16p(g.ClockGPU))
-		le.PutUint16(blk[10:], clampU16p(g.ClockMem))
-		le.PutUint64(blk[12:], clampU64(g.MemUsed))
-	}
+	w.gpuPrev = next
+	return t, errors.Join(errs...)
+}
+
+// AddError 加入一筆錯誤記錄, 回傳其時刻. 文字原樣存入, 不截斷.
+func (w *Writer) AddError(ts float64, msg string) int64 {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	t := w.clampTime(w.timeLocked(ts))
+	w.addRecord(&Record{Kind: KindError, Time: t, Text: msg})
 	return t
 }
 
-func clampU16(v int) uint16 {
-	if v < 0 {
-		return 0
-	}
-	if v > math.MaxUint16 {
-		return math.MaxUint16
-	}
-	return uint16(v)
-}
-
-func clampU8(v *int64) uint8 {
-	switch {
-	case v == nil:
-		return NoValue8
-	case *v < 0:
-		return 0
-	case *v > int64(NoValue8)-1:
-		return NoValue8 - 1
-	}
-	return uint8(*v)
-}
-
-func clampI16(v *int64) int16 {
-	switch {
-	case v == nil:
-		return NoValueI16
-	case *v < math.MinInt16:
-		return math.MinInt16
-	case *v > int64(NoValueI16)-1:
-		return NoValueI16 - 1
-	}
-	return int16(*v)
-}
-
-func clampU16p(v *int64) uint16 {
-	switch {
-	case v == nil:
-		return NoValue16
-	case *v < 0:
-		return 0
-	case *v > int64(NoValue16)-1:
-		return NoValue16 - 1
-	}
-	return uint16(*v)
-}
-
-func clampU64(v *uint64) uint64 {
-	switch {
-	case v == nil:
-		return NoValue64
-	case *v > NoValue64-1:
-		return NoValue64 - 1
-	}
-	return *v
-}
-
-// truncateText 將文字截短至不超過 limit 位元組, 自結尾刪去整個 UTF-8 字元.
-func truncateText(s string, limit int) []byte {
-	if len(s) <= limit {
-		return []byte(s)
-	}
-	cut := limit
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
-	}
-	return []byte(s[:cut])
-}
-
-// addChunked 寫入一筆首記錄與其後的接續記錄. payload 長度即首記錄位移 9 的值.
-func (w *Writer) addChunked(kind Kind, t int64, payload []byte) {
-	size := gpuBlockSize * w.n
-	first := true
-	for rest := payload; first || len(rest) > 0; first = false {
-		take := min(size, len(rest))
-		var rec []byte
-		if first {
-			rec = w.newRecord(kind, t, uint16(len(payload)))
-		} else {
-			rec = w.newRecord(KindContinue, t, 0)
-		}
-		copy(rec[recordHeaderSize:], rest[:take])
-		rest = rest[take:]
-	}
-}
-
-// AddError 加入一則 error 訊息 (錯誤記錄與其接續記錄), 訊息文字超過 1024 位元組時截短.
-func (w *Writer) AddError(ts float64, msg string) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	t := w.clampTime(w.timeLocked(ts))
-	w.addChunked(KindError, t, truncateText(msg, maxMessageBytes))
-}
-
-// AddDisconnect 加入一筆斷線記錄. t 為本機判定斷線的時刻 (微秒), 早於前一筆記錄時以前一筆記錄的時刻計.
-func (w *Writer) AddDisconnect(t int64, reason string) {
+// AddDisconnect 加入一筆斷線記錄, 回傳其時刻. t 為本機判定斷線的時刻 (微秒), 早於前一筆記錄時
+// 以前一筆記錄的時刻計. 斷線記錄不重設程序列表的比較對象.
+func (w *Writer) AddDisconnect(t int64, reason string) int64 {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	t = w.clampTime(t)
-	w.addChunked(KindDisconnect, t, truncateText(reason, maxMessageBytes))
+	w.addRecord(&Record{Kind: KindDisconnect, Time: t, Text: reason})
+	return t
 }
 
-// AddProcesses 加入一筆程序記錄, ts 為同一筆 sample 訊息的 ts. 各 GPU 的程序合併為一個 JSON 陣列,
-// 每個元素另加成員 gpu; 超過 65535 位元組時自陣列結尾刪去整個元素. 任一元素不是 JSON 物件時回報錯誤且不加入任何記錄.
-func (w *Writer) AddProcesses(ts float64, procs []GPUProcs) error {
-	var elems [][]byte
-	for _, gp := range procs {
-		for _, raw := range gp.Procs {
-			e, err := withGPUMember(raw, gp.GPU)
-			if err != nil {
-				return err
-			}
-			elems = append(elems, e)
-		}
-	}
-	total := 2
-	for _, e := range elems {
-		total += len(e)
-	}
-	if len(elems) > 1 {
-		total += len(elems) - 1
-	}
-	for total > maxProcessesBytes {
-		last := elems[len(elems)-1]
-		total -= len(last)
-		if len(elems) > 1 {
-			total--
-		}
-		elems = elems[:len(elems)-1]
-	}
-	payload := make([]byte, 0, total)
-	payload = append(payload, '[')
-	for i, e := range elems {
-		if i > 0 {
-			payload = append(payload, ',')
-		}
-		payload = append(payload, e...)
-	}
-	payload = append(payload, ']')
-
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	t := w.clampTime(w.timeLocked(ts))
-	w.addChunked(KindProcesses, t, payload)
-	return nil
-}
-
-// withGPUMember 將 JSON 物件壓縮後在結尾加上 gpu 成員.
-func withGPUMember(raw json.RawMessage, gpu int) ([]byte, error) {
-	var b bytes.Buffer
-	if err := json.Compact(&b, raw); err != nil {
-		return nil, fmt.Errorf("recording: invalid process element: %w", err)
-	}
-	e := b.Bytes()
-	if len(e) < 2 || e[0] != '{' {
-		return nil, errors.New("recording: process element is not a JSON object")
-	}
-	e = e[:len(e)-1]
-	if len(e) > 1 {
-		e = append(e, ',')
-	}
-	e = fmt.Appendf(e, `"gpu":%d}`, gpu)
-	return e, nil
-}
-
-// Flush 將累積的記錄以一次寫入附加到檔尾. 寫入失敗時嘗試截回原長度並保留緩衝, 供下次重試.
+// Flush 把累積的記錄寫成一個區塊, 以一次寫入附加到檔尾; 沒有累積的記錄時不寫入. 寫入失敗時
+// 把檔案截回原長度並保留緩衝, 下次存檔時連同新的記錄寫成一個區塊.
 func (w *Writer) Flush() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -432,16 +302,47 @@ func (w *Writer) flushLocked() error {
 	if len(w.buf) == 0 {
 		return nil
 	}
-	n, err := w.f.Write(w.buf)
+	if len(w.buf) > math.MaxUint32 {
+		return errors.New("recording: block too large")
+	}
+	content := encoder().EncodeAll(w.buf, nil)
+	if len(content) > math.MaxUint32-blockHeaderSize {
+		return errors.New("recording: block too large")
+	}
+	off := w.size - w.base
+	reset := w.lastReset
+	if w.bufReset {
+		reset = off
+	}
+	blk := make([]byte, blockHeaderSize, blockHeaderSize+len(content))
+	copy(blk, syncMarker)
+	le.PutUint32(blk[16:], uint32(len(content)))
+	le.PutUint32(blk[20:], uint32(len(w.buf)))
+	le.PutUint32(blk[24:], w.prevTotal)
+	le.PutUint64(blk[28:], uint64(w.bufFirst))
+	le.PutUint64(blk[36:], uint64(w.bufLast))
+	le.PutUint64(blk[44:], uint64(reset))
+	crc := crc32.Update(crc32.Checksum(blk[:52], castagnoli), castagnoli, content)
+	le.PutUint32(blk[52:], crc)
+	blk = append(blk, content...)
+	n, err := w.f.Write(blk)
 	if err != nil {
 		if n > 0 {
 			if terr := w.f.Truncate(w.size); terr != nil {
+				// 截回失敗時檔尾留有不完整的區塊, 之後的區塊位移須以實際長度計算.
+				if st, serr := w.f.Stat(); serr == nil {
+					w.size = st.Size()
+				}
 				return errors.Join(err, terr)
 			}
 		}
 		return err
 	}
 	w.size += int64(n)
+	w.prevTotal = uint32(len(blk))
+	if w.bufReset {
+		w.lastReset = off
+	}
 	w.buf = w.buf[:0]
 	return nil
 }

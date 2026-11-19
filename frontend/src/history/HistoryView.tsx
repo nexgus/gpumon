@@ -23,7 +23,6 @@ import { HistoryBlock } from "./HistoryBlock";
 
 // 捲動範圍長度的下限 (微秒), 避免所開啟的記錄檔只有一筆記錄時長度為零.
 const minSpan = 1e6;
-const defaultSpanMS = 300_000;
 const defaultMinMS = 60_000;
 // 邊緣自動捲動每秒移動顯示範圍長度的比例.
 const edgeSpeed = 0.1;
@@ -64,8 +63,8 @@ export function HistoryView() {
   const t = useT();
   const path = useStore(historyStore, (h) => h.path);
   const storedLeft = useStore(historyStore, (h) => h.left);
-  const spanMS = useStore(settingsStore, (s) => s?.history_span_ms) ?? defaultSpanMS;
-  const allSetting = useStore(settingsStore, (s) => s?.history_all) ?? false;
+  const spanMS = useStore(historyStore, (h) => h.spanMS);
+  const allState = useStore(historyStore, (h) => h.all);
   const minMS = useStore(choicesStore, (c) => c?.min_span_ms) ?? defaultMinMS;
   const curves = useStore(settingsStore, (s) => s?.curves) ?? defaultCurves;
   const collapsed = useStore(settingsStore, (s) => s?.collapsed_gpus);
@@ -116,11 +115,11 @@ export function HistoryView() {
   const min = info?.start ?? 0;
   const max = info?.end ?? 0;
   // 顯示範圍的長度最短 1 分鐘, 最長為捲動範圍的長度; 捲動範圍短於 1 分鐘時即為捲動範圍
-  // 的長度. 處於顯示全部狀態, 或記住的長度不短於捲動範圍時, 顯示範圍涵蓋整個捲動範圍.
+  // 的長度. 開啟記錄檔時處於顯示全部狀態; 處於顯示全部狀態, 或所記的長度不短於捲動範圍時, 顯示範圍涵蓋整個捲動範圍.
   const total = Math.max(minSpan, max - min);
   const minLen = Math.min(minMS * 1000, total);
   const stored = Math.max(minLen, spanMS * 1000);
-  const all = allSetting || stored >= total;
+  const all = allState || stored >= total;
   const span = all ? total : stored;
   const maxLeft = Math.max(min, max - span);
   const left = all ? min : Math.min(maxLeft, Math.max(min, storedLeft ?? maxLeft));
@@ -227,9 +226,9 @@ export function HistoryView() {
       v.left = nextLeft;
       v.maxLeft = Math.max(v.min, v.max - next);
       setHistoryLeft(nextLeft);
-      setHistorySpan(next / 1000, toAll, minMS);
+      setHistorySpan(next / 1000, toAll);
     },
-    [stopFling, minMS],
+    [stopFling],
   );
   const onSelecting = useCallback((on: boolean) => {
     selectingRef.current = on;
@@ -278,14 +277,14 @@ export function HistoryView() {
       v.left = nextLeft;
       v.maxLeft = Math.max(v.min, v.max - next);
       setHistoryLeft(nextLeft);
-      setHistorySpan(next / 1000, toAll, minMS);
+      setHistorySpan(next / 1000, toAll);
     },
-    [stopFling, minMS],
+    [stopFling],
   );
   const showAll = () => {
     stopFling();
     setHistoryLeft(min);
-    setHistorySpan(total / 1000, true, minMS);
+    setHistorySpan(total / 1000, true);
   };
 
   const sameDay = info !== null && formatDateTime(min).slice(0, 10) === formatDateTime(max).slice(0, 10);

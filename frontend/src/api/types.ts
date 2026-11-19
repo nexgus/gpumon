@@ -399,11 +399,8 @@ export interface SettingsData {
   language: Language;
   // size_units 為記憶體與檔案大小的單位制, binary 為 1024 進位, decimal 為 1000 進位.
   size_units: SizeUnits;
-  // monitor_span_ms 與 history_span_ms 為監看畫面與歷史畫面的顯示範圍長度 (毫秒);
-  // history_all 為歷史畫面是否處於顯示全部狀態.
+  // monitor_span_ms 為監看畫面的顯示範圍長度 (毫秒).
   monitor_span_ms: number;
-  history_span_ms: number;
-  history_all: boolean;
   curves: Curve[] | null;
   collapsed_gpus: Record<string, number[] | undefined> | null;
   // collapsed_procs 為程序卡片已收合的主機識別字串.
@@ -524,7 +521,6 @@ export interface Backend {
   setLanguage(v: Language): Promise<void>;
   setSizeUnits(v: SizeUnits): Promise<void>;
   setMonitorSpan(ms: number): Promise<void>;
-  setHistorySpan(ms: number, all: boolean): Promise<void>;
   setCurves(curves: Curve[]): Promise<void>;
   setGPUCollapsed(hostID: string, gpuID: number, collapsed: boolean): Promise<void>;
   setProcessesCollapsed(hostID: string, collapsed: boolean): Promise<void>;

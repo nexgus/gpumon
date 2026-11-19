@@ -18,13 +18,6 @@ const (
 	maxTime           = int64(math.MaxInt64)
 	gapFactor         = 3
 	defaultIntervalMS = 1000
-	// 主要範圍每次讀取的記錄筆數, 決定串流時的暫存用量.
-	chunkRecords = 2048
-	// 範圍後尋找下一筆取樣時每次讀取的筆數.
-	scanRecords = 4096
-	// 範圍前尋找前一筆取樣時第一次讀取的筆數, 之後每次加倍. 監看畫面每筆取樣的增量查詢
-	// 範圍很短, 起始筆數小可避免每次都讀取大量記錄.
-	scanBackRecords = 64
 )
 
 // Query 為曲線查詢的條件.
@@ -63,9 +56,11 @@ type engine struct {
 	q      Query
 	span   uint64
 	fields []Field
-	nGPU   int
-	nSer   int
-	gpuIDs []int
+	// metrics 為 fields 各欄位對應的記錄檔數值欄位.
+	metrics []recording.Metric
+	nGPU    int
+	nSer    int
+	gpuIDs  []int
 
 	cur *queryFile
 
@@ -127,7 +122,7 @@ func QueryRangePending(ctx context.Context, paths []string, pending []Pending, q
 	if err != nil {
 		return nil, err
 	}
-	e := &engine{q: q, span: span, fields: fields, rawOK: true}
+	e := &engine{q: q, span: span, fields: fields, metrics: metricsOf(fields), rawOK: true}
 	e.setup(files)
 	for _, qf := range files {
 		if e.done {
@@ -151,13 +146,9 @@ func openFiles(paths []string, pending []Pending, q Query) ([]*queryFile, error)
 			firstErr = err
 			break
 		}
-		var f recordSource = rf
+		var f recordSource = fileSource{rf}
 		if recs := pendingFor(pending, p); len(recs) > 0 {
-			if f, err = newPendingSource(rf, recs); err != nil {
-				rf.Close()
-				firstErr = err
-				break
-			}
+			f = newPendingSource(rf, recs)
 		}
 		first, last, ok, err := f.TimeRange()
 		if err != nil {
@@ -246,78 +237,69 @@ func (e *engine) binStart(i int) int64 {
 	return e.q.From + int64(q)
 }
 
+// runFile 讀取一個檔案中與範圍相關的記錄. 自含有範圍起點的段開始往後讀, 直到範圍後的第一筆
+// 取樣為止; 範圍起點之前若需要前一筆取樣以判定無資料時段, 再往前讀到取得一筆取樣為止.
+// 讀取以段為單位, 記憶體用量與檔案長度無關.
 func (e *engine) runFile(ctx context.Context, qf *queryFile) error {
 	e.cur = qf
-	n, err := qf.f.Count()
+	it, err := qf.f.SeekTime(max(e.q.From, e.q.NotBefore), false)
 	if err != nil {
 		return err
 	}
-	lo, err := qf.f.LowerBound(max(e.q.From, e.q.NotBefore))
+	first, ok, err := it.Next()
 	if err != nil {
 		return err
 	}
-	hi := n
-	if e.q.To < maxTime {
-		if hi, err = qf.f.LowerBound(e.q.To + 1); err != nil {
-			return err
+	if e.q.From > e.q.NotBefore && !hasSampleBefore(first, e.q.From) {
+		var earlier [][]recording.Record
+		for {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			recs, ok, err := it.Prev()
+			if err != nil {
+				return err
+			}
+			if !ok {
+				break
+			}
+			earlier = append(earlier, recs)
+			if hasSampleBefore(recs, maxTime) {
+				break
+			}
+		}
+		for i := len(earlier) - 1; i >= 0; i-- {
+			e.handleAll(earlier[i])
 		}
 	}
-	if lo > 0 && e.q.From > e.q.NotBefore {
-		if err := e.scanBack(ctx, qf, lo); err != nil {
-			return err
-		}
-	}
-	for i := lo; i < hi && !e.done; i += chunkRecords {
+	for ok && !e.done {
+		e.handleAll(first)
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		recs, err := qf.f.ReadIndexRange(i, min(i+chunkRecords, hi))
-		if err != nil {
+		if first, ok, err = it.Next(); err != nil {
 			return err
-		}
-		for k := range recs {
-			e.handle(&recs[k])
-		}
-	}
-	for i := hi; i < n && !e.done; i += scanRecords {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		recs, err := qf.f.ReadIndexRange(i, min(i+scanRecords, n))
-		if err != nil {
-			return err
-		}
-		for k := range recs {
-			e.handle(&recs[k])
 		}
 	}
 	return nil
 }
 
-// scanBack 往前讀取範圍起點之前的記錄, 直到取得至少一筆取樣, 以得知範圍前最近的取樣與其後的事件.
-func (e *engine) scanBack(ctx context.Context, qf *queryFile, lo int) error {
-	for c := scanBackRecords; ; c *= 2 {
-		if err := ctx.Err(); err != nil {
-			return err
+// hasSampleBefore 表示 recs 中有時刻早於 t 的取樣記錄.
+func hasSampleBefore(recs []recording.Record, t int64) bool {
+	for k := range recs {
+		if recs[k].Kind == recording.KindSample && recs[k].Time < t {
+			return true
 		}
-		start := max(0, lo-c)
-		recs, err := qf.f.ReadIndexRange(start, lo)
-		if err != nil {
-			return err
+	}
+	return false
+}
+
+func (e *engine) handleAll(recs []recording.Record) {
+	for k := range recs {
+		if e.done {
+			return
 		}
-		found := false
-		for k := range recs {
-			if recs[k].Kind == recording.KindSample {
-				found = true
-				break
-			}
-		}
-		if found || start == 0 {
-			for k := range recs {
-				e.handle(&recs[k])
-			}
-			return nil
-		}
+		e.handle(&recs[k])
 	}
 }
 
@@ -392,28 +374,25 @@ func (e *engine) checkGap(rec *recording.Record) bool {
 	return true
 }
 
-func fieldValue(g *recording.GPUValues, f Field) (float64, bool) {
-	switch f {
-	case FieldUtil:
-		return float64(g.Util), g.Util != recording.NoValue8
-	case FieldMemUsed:
-		return float64(g.MemUsed), g.MemUsed != recording.NoValue64
-	case FieldTemp:
-		return float64(g.Temp), g.Temp != recording.NoValueI16
-	case FieldPowerW:
-		return float64(g.PowerW), g.PowerW != recording.NoValue16
-	case FieldClockGPU:
-		return float64(g.ClockGPU), g.ClockGPU != recording.NoValue16
-	case FieldClockMem:
-		return float64(g.ClockMem), g.ClockMem != recording.NoValue16
-	case FieldFan:
-		return float64(g.Fan), g.Fan != recording.NoValue8
-	case FieldEnc:
-		return float64(g.Enc), g.Enc != recording.NoValue8
-	case FieldDec:
-		return float64(g.Dec), g.Dec != recording.NoValue8
+// fieldMetric 為各欄位對應的記錄檔數值欄位.
+var fieldMetric = map[Field]recording.Metric{
+	FieldUtil:     recording.MetricUtil,
+	FieldMemUsed:  recording.MetricMemUsed,
+	FieldTemp:     recording.MetricTemp,
+	FieldPowerW:   recording.MetricPowerW,
+	FieldClockGPU: recording.MetricClockGPU,
+	FieldClockMem: recording.MetricClockMem,
+	FieldFan:      recording.MetricFan,
+	FieldEnc:      recording.MetricEnc,
+	FieldDec:      recording.MetricDec,
+}
+
+func metricsOf(fields []Field) []recording.Metric {
+	out := make([]recording.Metric, len(fields))
+	for i, f := range fields {
+		out[i] = fieldMetric[f]
 	}
-	return 0, false
+	return out
 }
 
 func (e *engine) addSample(rec *recording.Record, bin int) {
@@ -441,8 +420,8 @@ func (e *engine) addSample(rec *recording.Record, bin int) {
 		if u < 0 {
 			continue
 		}
-		for fi, f := range e.fields {
-			v, ok := fieldValue(&rec.GPUs[i], f)
+		for fi, m := range e.metrics {
+			v, ok := rec.GPUs[i].Value(m)
 			if !ok {
 				continue
 			}

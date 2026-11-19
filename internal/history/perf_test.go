@@ -1,6 +1,9 @@
 package history
 
 import (
+	"encoding/json"
+	"fmt"
+	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -29,7 +32,7 @@ func worstCaseFile(tb testing.TB) string {
 			gs[i] = recording.GPUSample{ID: i, Util: iv(int64((k + i*13) % 101)), Temp: iv(int64(40 + k%50)),
 				PowerW: iv(int64(100 + k%300)), ClockGPU: iv(1500), ClockMem: iv(9000), Fan: iv(30), Enc: iv(0), Dec: iv(0), MemUsed: &mem}
 		}
-		w.AddSample(ts0+float64(k)*0.2, 200, gs)
+		w.AddSample(ts0+float64(k)*0.2, 200, gs, nil)
 		if k%1000 == 999 {
 			if err := w.Flush(); err != nil {
 				tb.Fatal(err)
@@ -93,7 +96,11 @@ func TestWorstCaseMemory(t *testing.T) {
 		t.Fatalf("result: binned=%v samples=%d gaps=%d", r.Binned, r.Samples, len(r.Gaps))
 	}
 	grown := int64(peak.Load()) - int64(base.HeapAlloc)
-	t.Logf("worst case: %v elapsed, peak heap growth %.1f MiB (file %d MiB)", elapsed, float64(grown)/(1<<20), worstSamples*(11+160)>>20)
+	st, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("worst case: %v elapsed, peak heap growth %.1f MiB (file %.1f MiB)", elapsed, float64(grown)/(1<<20), float64(st.Size())/(1<<20))
 	if grown > 48<<20 {
 		t.Fatalf("peak heap growth %d MiB too large", grown>>20)
 	}
@@ -173,5 +180,61 @@ func BenchmarkLiveTail(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+// TestProcessesAtCost 量測滑鼠移動時查詢程序列表的成本. 8 張 GPU, 取樣間隔 200 ms, 每張 GPU
+// 4 個程序且記憶體用量每次取樣皆改變, 每 5 秒存檔一次; 查詢時刻位於列表重設區塊之前, 須由
+// 約 10 分鐘前的列表重設區塊起套用程序變動記錄.
+func TestProcessesAtCost(t *testing.T) {
+	if testing.Short() {
+		t.Skip("large file")
+	}
+	ids := []int{0, 1, 2, 3, 4, 5, 6, 7}
+	w, err := recording.Create(t.TempDir(), recording.Header{Host: "a@b", TWall0: twall, TS0: ts0, Devices: devices(ids...)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	const samples = 25 * 60 * 5
+	gs := make([]recording.GPUSample, len(ids))
+	for k := 0; k < samples; k++ {
+		var procs []recording.GPUProcs
+		for i := range gs {
+			gs[i] = recording.GPUSample{ID: i, Util: iv(int64(k % 100))}
+			var elems []json.RawMessage
+			for p := 0; p < 4; p++ {
+				elems = append(elems, json.RawMessage(fmt.Sprintf(
+					`{"pid":%d,"user":"user%d","mem":%d,"util":%d,"cmd":"python train.py --rank %d"}`, 1000+i*10+p, p, 1<<30+k*4096, k%100, p)))
+			}
+			procs = append(procs, recording.GPUProcs{GPU: i, Procs: elems})
+		}
+		if _, err := w.AddSample(ts0+float64(k)*0.2, 200, gs, procs); err != nil {
+			t.Fatal(err)
+		}
+		if k%25 == 24 {
+			if err := w.Flush(); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := w.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	// 第二個列表重設區塊始於第 600 秒, 查詢其前一刻.
+	at := twall + 600*sec - 300000
+	const n = 20
+	start := time.Now()
+	for i := 0; i < n; i++ {
+		p, err := ProcessesAt(w.Path(), at)
+		if err != nil || p == nil {
+			t.Fatalf("processes %+v %v", p, err)
+		}
+	}
+	d := time.Since(start) / n
+	st, _ := os.Stat(w.Path())
+	t.Logf("ProcessesAt %v per query (file %.1f MiB)", d, float64(st.Size())/(1<<20))
+	if d > 200*time.Millisecond {
+		t.Fatalf("ProcessesAt takes %v", d)
 	}
 }

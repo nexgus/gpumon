@@ -40,11 +40,11 @@ func TestMaximaRunsAndBreaks(t *testing.T) {
 		{0, iv(5)}, {1, iv(5)}, {2, iv(4)}, {3, iv(5)}, {4, nil}, {5, iv(5)}, {6, iv(5)},
 	}
 	for _, s := range seq {
-		w.AddSample(ts0+s.rel, 1000, []recording.GPUSample{{ID: 0, Util: s.util}, utilOnly(1, 1)})
+		w.AddSample(ts0+s.rel, 1000, []recording.GPUSample{{ID: 0, Util: s.util}, utilOnly(1, 1)}, nil)
 	}
 	w.AddDisconnect(twall+6*sec+500000, "lost")
-	w.AddSample(ts0+7, 1000, []recording.GPUSample{utilOnly(0, 5), utilOnly(1, 1)})
-	w.AddSample(ts0+8, 1000, []recording.GPUSample{utilOnly(0, 5), utilOnly(1, 1)})
+	w.AddSample(ts0+7, 1000, []recording.GPUSample{utilOnly(0, 5), utilOnly(1, 1)}, nil)
+	w.AddSample(ts0+8, 1000, []recording.GPUSample{utilOnly(0, 5), utilOnly(1, 1)}, nil)
 	flush(t, w)
 	r, err := Maxima(w.Path())
 	if err != nil {
@@ -73,7 +73,7 @@ func TestMaximaRunsAndBreaks(t *testing.T) {
 func TestMaximaReplacedByLarger(t *testing.T) {
 	w := newRec(t, t.TempDir(), "a@b", 0, 0)
 	for i, u := range []int64{3, 3, 2, 3, 7, 7, 1, 7, 6} {
-		w.AddSample(ts0+float64(i), 1000, []recording.GPUSample{utilOnly(0, u)})
+		w.AddSample(ts0+float64(i), 1000, []recording.GPUSample{utilOnly(0, u)}, nil)
 	}
 	flush(t, w)
 	r, err := Maxima(w.Path())
@@ -90,9 +90,9 @@ func TestMaximaAllFields(t *testing.T) {
 	w := newRec(t, t.TempDir(), "a@b", 0, 0)
 	mem := func(v uint64) *uint64 { return &v }
 	w.AddSample(ts0, 1000, []recording.GPUSample{{ID: 0, Util: iv(1), MemUsed: mem(900), Temp: iv(-5),
-		Fan: iv(30), PowerW: iv(100), ClockGPU: iv(2000), ClockMem: iv(9000)}})
+		Fan: iv(30), PowerW: iv(100), ClockGPU: iv(2000), ClockMem: iv(9000)}}, nil)
 	w.AddSample(ts0+1, 1000, []recording.GPUSample{{ID: 0, Util: iv(2), MemUsed: mem(800), Temp: iv(-4),
-		Fan: iv(30), PowerW: iv(90), ClockGPU: iv(2100), ClockMem: iv(9000)}})
+		Fan: iv(30), PowerW: iv(90), ClockGPU: iv(2100), ClockMem: iv(9000)}}, nil)
 	flush(t, w)
 	r, err := Maxima(w.Path())
 	if err != nil {
@@ -131,10 +131,10 @@ func TestSampleAt(t *testing.T) {
 	w.AddSample(ts0, 1000, []recording.GPUSample{
 		{ID: 0, Util: iv(95), MemUsed: mem(88691000000), Temp: iv(58), Fan: iv(34), PowerW: iv(160), ClockGPU: iv(2872), ClockMem: iv(13365)},
 		{ID: 1, Util: iv(3)},
-	})
-	w.AddSample(ts0+1, 1000, []recording.GPUSample{utilOnly(0, 10), utilOnly(1, 20)})
+	}, nil)
+	w.AddSample(ts0+1, 1000, []recording.GPUSample{utilOnly(0, 10), utilOnly(1, 20)}, nil)
 	w.AddDisconnect(twall+1*sec+100000, "lost")
-	w.AddSample(ts0+10, 1000, []recording.GPUSample{utilOnly(0, 50), utilOnly(1, 60)})
+	w.AddSample(ts0+10, 1000, []recording.GPUSample{utilOnly(0, 50), utilOnly(1, 60)}, nil)
 	flush(t, w)
 	p := w.Path()
 	at := func(t0 int64) *SampleAtResult {
@@ -178,8 +178,8 @@ func TestSampleAt(t *testing.T) {
 
 func TestSampleAtInterval(t *testing.T) {
 	w := newRec(t, t.TempDir(), "a@b", 0, 0)
-	w.AddSample(ts0, 1000, []recording.GPUSample{utilOnly(0, 1)})
-	w.AddSample(ts0+10, 500, []recording.GPUSample{utilOnly(0, 2)})
+	w.AddSample(ts0, 1000, []recording.GPUSample{utilOnly(0, 1)}, nil)
+	w.AddSample(ts0+10, 500, []recording.GPUSample{utilOnly(0, 2)}, nil)
 	flush(t, w)
 	cases := []struct {
 		t    int64
@@ -206,17 +206,10 @@ func TestMaxTracker(t *testing.T) {
 	if got := m.Result(); len(got) != 2 || got[0].ID != 1 || got[1].ID != 3 || len(got[0].Fields) != 0 {
 		t.Fatalf("empty tracker %+v", got)
 	}
-	none := recording.GPUValues{
-		Util: recording.NoValue8, Fan: recording.NoValue8, Enc: recording.NoValue8, Dec: recording.NoValue8,
-		Temp: recording.NoValueI16, PowerW: recording.NoValue16, ClockGPU: recording.NoValue16,
-		ClockMem: recording.NoValue16, MemUsed: recording.NoValue64,
-	}
-	sample := func(util0, temp1 uint8) *recording.Record {
-		g0, g1, g2 := none, none, none
-		g0.ID, g0.Util = 3, util0
-		g1.ID, g1.Temp = 1, int16(temp1)
-		g2.ID, g2.Util = 3, 99
-		return &recording.Record{Kind: recording.KindSample, GPUs: []recording.GPUValues{g0, g1, g2}}
+	sample := func(util0, temp1 int64) *recording.Record {
+		gs := recording.SampleValues([]int{3, 1, 3}, []recording.GPUSample{{ID: 3, Util: iv(util0)}, {ID: 1, Temp: iv(temp1)}})
+		gs[2].Util, gs[2].Has = 99, 1<<recording.MetricUtil
+		return &recording.Record{Kind: recording.KindSample, GPUs: gs}
 	}
 	m.Add(sample(20, 50))
 	m.Add(sample(60, 40))

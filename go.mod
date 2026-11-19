@@ -5,10 +5,12 @@ go 1.26.0
 require (
 	github.com/Microsoft/go-winio v0.6.2
 	github.com/ebitengine/purego v0.11.1
+	github.com/klauspost/compress v1.18.7
 	github.com/pkg/sftp v1.13.11
 	github.com/skeema/knownhosts v1.3.2
 	github.com/wailsapp/wails/v3 v3.1.0
 	golang.org/x/crypto v0.57.0
+	google.golang.org/protobuf v1.36.11
 )
 
 require (
@@ -82,7 +84,6 @@ require (
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/kevinburke/ssh_config v1.4.0 // indirect
-	github.com/klauspost/compress v1.18.7 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/klauspost/pgzip v1.2.6 // indirect
 	github.com/kr/fs v0.1.0 // indirect

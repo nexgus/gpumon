@@ -76,22 +76,20 @@ func load(path string) (Data, error) {
 	return d, notice
 }
 
-// legacyRangeMS 為舊版以選項表示的顯示範圍及其長度, 單位為毫秒. 歷史畫面另有
-// "all", 由 applyLegacyRanges 處理.
+// legacyRangeMS 為舊版以選項表示的顯示範圍及其長度, 單位為毫秒.
 var legacyRangeMS = map[string]int64{
 	"1m": 60_000, "5m": 300_000, "15m": 900_000, "30m": 1_800_000, "60m": 3_600_000,
 	"3h": 10_800_000, "6h": 21_600_000, "12h": 43_200_000, "24h": 86_400_000,
 }
 
 // applyLegacyRanges 以舊版設定檔的顯示範圍承接新版的顯示範圍長度. 監看畫面的長度
-// 依序取 monitor_span_ms, monitor_range, 更早版本的 shared_range; 歷史畫面沒有
-// history_span_ms 而有 history_range 時換算其長度, 其值為 "all" 時處於顯示全部
-// 狀態, 長度維持預設值. 舊版成員不在 Data 結構內, 下次寫入後即不再保留.
+// 依序取 monitor_span_ms, monitor_range, 更早版本的 shared_range. 歷史畫面的
+// 顯示範圍不存於設定檔, 舊版的 history_span_ms, history_all 與 history_range
+// 一概略過. 舊版成員不在 Data 結構內, 下次寫入後即不再保留.
 func applyLegacyRanges(d *Data, top map[string]json.RawMessage, raw []byte) {
 	var legacy struct {
 		SharedRange  string `json:"shared_range"`
 		MonitorRange string `json:"monitor_range"`
-		HistoryRange string `json:"history_range"`
 	}
 	// 型別不符的舊版成員視為不存在, 其餘成員照常取用.
 	_ = json.Unmarshal(raw, &legacy)
@@ -102,15 +100,6 @@ func applyLegacyRanges(d *Data, top map[string]json.RawMessage, raw []byte) {
 		}
 		if ms, ok := legacyRangeMS[src]; ok {
 			d.MonitorSpanMS = ms
-		}
-	}
-	if _, ok := top["history_span_ms"]; !ok {
-		if legacy.HistoryRange == "all" {
-			if _, has := top["history_all"]; !has {
-				d.HistoryAll = true
-			}
-		} else if ms, ok := legacyRangeMS[legacy.HistoryRange]; ok {
-			d.HistorySpanMS = ms
 		}
 	}
 }
@@ -354,18 +343,6 @@ func (s *Store) SetMonitorSpan(ms int64) error {
 		return invalid("monitor span %d ms out of range %d-%d", ms, MinSpanMS, MaxMonitorSpanMS)
 	}
 	return s.update(func(d *Data) error { d.MonitorSpanMS = ms; return nil })
-}
-
-// SetHistorySpan 設定歷史畫面的顯示範圍長度 (毫秒, 不短於 MinSpanMS) 與是否處於
-// 顯示全部狀態.
-func (s *Store) SetHistorySpan(ms int64, all bool) error {
-	if ms < MinSpanMS {
-		return invalid("history span %d ms shorter than %d", ms, MinSpanMS)
-	}
-	return s.update(func(d *Data) error {
-		d.HistorySpanMS, d.HistoryAll = ms, all
-		return nil
-	})
 }
 
 // SetCurves 設定曲線的選擇. 曲線不得重複, 順序依傳入者保留.
